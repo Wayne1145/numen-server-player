@@ -1,0 +1,107 @@
+plugins {
+    id 'multiloader-loader'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+minecraft {
+    mappings channel: 'official', version: minecraft_version
+    copyIdeResources = true // Calls processResources when in dev
+
+    // Automatically enable forge AccessTransformers if the file exists.
+    // This location is hardcoded in Forge and can not be changed.
+    def at = file('src/main/resources/META-INF/accesstransformer.cfg')
+    if (at.exists()) {
+        accessTransformer = at
+    }
+
+    runs {
+        client {
+            workingDirectory file('runs/client')
+            ideaModule "${rootProject.name}.${project.name}.main"
+            taskName 'Client'
+            mods { modClientRun { source sourceSets.main } }
+            // See the data run: the api mod's SRG refmap vs. official-named runtime.
+            property 'mixin.env.disableRefMap', 'true'
+        }
+        server {
+            workingDirectory file('runs/server')
+            ideaModule "${rootProject.name}.${project.name}.main"
+            taskName 'Server'
+            mods { modServerRun { source sourceSets.main } }
+            property 'mixin.env.disableRefMap', 'true'
+        }
+        data {
+            workingDirectory file('runs/data')
+            ideaModule "${rootProject.name}.${project.name}.main"
+            args '--mod', mod_id, '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
+            taskName 'Data'
+            mods { modDataRun { source sourceSets.main } }
+            // The bundled numen-api mod ships an SRG refmap, but this dev runtime
+            // uses official names. Its mixin sources are written against official
+            // names too, so skipping the refmap makes them apply directly.
+            property 'mixin.env.disableRefMap', 'true'
+        }
+    }
+}
+
+// Package this module's own datagen output (`./gradlew :forge:Data` writes it there).
+sourceSets.main.resources.srcDir 'src/generated/resources'
+sourceSets.main.resources.exclude '.cache/**'
+
+// Bundle numen-api into core's Forge jar (Jar-in-Jar).
+jarJar.enable()
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    // The numen-api engine (matching-loader artifact, so the mcgradleconventions
+    // loader attribute resolves). compileOnly: the api classes are provided at
+    // runtime by the bundled numen-api mod, not by core's own jar.
+    compileOnly("com.dwinovo.numen:numen-api-forge-1.20.1:0.0.7-SNAPSHOT") { changing = true }
+    // Dev-runtime copy of the engine mod: core's mods.toml marks numen_api as a
+    // mandatory dependency, so FML refuses to boot any run (incl. the Data run)
+    // without it on the classpath. fg.deobf remaps the published SRG jar back to
+    // the official names the dev runtime uses. transitive=false: the api's
+    // published metadata carries its own dev-mapped forge dependency
+    // (net.minecraftforge:forge:*_mapped_official_*), which no repo can serve —
+    // the loader is already on the classpath here anyway.
+    runtimeOnly(fg.deobf("com.dwinovo.numen:numen-api-forge-1.20.1:0.0.7-SNAPSHOT")) {
+        changing = true
+        transitive = false
+    }
+    // Bundle the Forge build of the api into META-INF/jarjar/ so one file ships both mods.
+    // transitive=false: only the api jar is nested — its Forge/Minecraft deps are provided
+    // by the loader at runtime and must NOT be embedded (that would bloat the jar to ~94MB).
+    jarJar(group: 'com.dwinovo.numen', name: 'numen-api-forge-1.20.1', version: '0.0.7-SNAPSHOT') {
+        transitive = false
+        jarJar.ranged(it, '[0.0.0,)')
+    }
+}
+
+jar.finalizedBy('reobfJar')
+
+// Implement mcgradleconventions loader attribute
+def loaderAttribute = Attribute.of('io.github.mcgradleconventions.loader', String)
+['apiElements', 'runtimeElements', 'sourcesElements', 'javadocElements'].each { variant ->
+    configurations.named("$variant") {
+        attributes {
+            attribute(loaderAttribute, 'forge')
+        }
+    }
+}
+sourceSets.configureEach {
+    [it.compileClasspathConfigurationName, it.runtimeClasspathConfigurationName].each { variant ->
+        configurations.named("$variant") {
+            attributes {
+                attribute(loaderAttribute, 'forge')
+            }
+        }
+    }
+}
+
+// ForgeGradle quirk: classes + resources share one output dir so the dev launcher and the
+// mixin refmap see them together.
+sourceSets.each {
+    def dir = layout.buildDirectory.dir("sourcesSets/$it.name")
+    it.output.resourcesDir = dir
+    it.java.destinationDirectory = dir
+}

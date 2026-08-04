@@ -1,0 +1,49 @@
+# 构建与 Gradle
+.gradle/
+**/.gradle/
+**/build/
+local-maven/
+runs/
+**/runs/
+*.hprof
+hs_err_pid*.log
+replay_pid*.log
+
+# Minecraft 服务端运行时
+world/
+world_nether/
+world_the_end/
+logs/
+crash-reports/
+libraries/
+versions/
+mods/
+plugins/
+eula.txt
+server.properties
+server-icon.png
+ops.json
+whitelist.json
+banned-*.json
+usercache.json
+usernamecache.json
+
+# 凭据与本地配置
+.env
+.env.*
+*.pem
+*.key
+**/*token*
+**/*secret*
+**/*apikey*
+**/*api_key*
+**/config/numen/api_key.txt
+
+# IDE / OS / Python
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc

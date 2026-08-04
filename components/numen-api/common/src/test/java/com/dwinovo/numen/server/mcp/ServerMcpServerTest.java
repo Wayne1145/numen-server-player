@@ -1,0 +1,219 @@
+// SPDX-License-Identifier: LGPL-3.0-only
+// Fork-original (minecraft-numen-server-lab). See LICENSE-NOTICE.md.
+package com.dwinovo.numen.server.mcp;
+
+import com.dwinovo.numen.entity.ServerOwner;
+import com.dwinovo.numen.server.AuthTokens;
+import com.dwinovo.numen.server.CompanionRef;
+import com.dwinovo.numen.server.Lease;
+import com.dwinovo.numen.server.McpPrincipal;
+import com.dwinovo.numen.server.SecurityPolicy;
+import com.dwinovo.numen.server.ServerNumenActuator;
+import com.dwinovo.numen.server.TaskStatus;
+import com.dwinovo.numen.server.ToolResult;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Hermetic MCP protocol test: a mock actuator behind a real loopback {@link ServerMcpServer}, driven
+ * over HTTP with JSON-RPC 2.0 — no Minecraft, no network beyond loopback, no model API key. Covers
+ * the acceptance flow (initialize → tools/list → acquire_control → goto → task_status →
+ * release_control) plus auth, error codes, and resource limits.
+ */
+class ServerMcpServerTest {
+
+    /** A canned actuator: one companion "Bot", trivial leases, a goto that returns a task_id. */
+    static final class MockActuator implements ServerNumenActuator {
+        final UUID bot = UUID.randomUUID();
+
+        @Override public CompletableFuture<List<CompanionRef>> listCompanions(McpPrincipal p) {
+            return CompletableFuture.completedFuture(List.of(new CompanionRef(bot, "Bot", ServerOwner.ID, true)));
+        }
+        @Override public CompletableFuture<CompanionRef> createCompanion(McpPrincipal p, String name) {
+            return CompletableFuture.completedFuture(new CompanionRef(UUID.randomUUID(), name, ServerOwner.ID, true));
+        }
+        @Override public CompletableFuture<Boolean> deleteCompanion(McpPrincipal p, UUID id) {
+            return CompletableFuture.completedFuture(true);
+        }
+        @Override public CompletableFuture<Lease> acquireControl(McpPrincipal p, UUID id) {
+            return CompletableFuture.completedFuture(new Lease("lease-xyz", id, p.id(), 7, 0, Long.MAX_VALUE));
+        }
+        @Override public CompletableFuture<Void> releaseControl(McpPrincipal p, UUID id, String leaseId) {
+            return CompletableFuture.completedFuture(null);
+        }
+        @Override public CompletableFuture<ToolResult> invoke(McpPrincipal p, UUID id, String leaseId, String tool, JsonObject args) {
+            if ("goto".equals(tool)) {
+                return CompletableFuture.completedFuture(ToolResult.of(
+                        "{\"success\":true,\"data\":{\"task_id\":\"t1\",\"task\":\"goto\",\"async\":true}}"));
+            }
+            return CompletableFuture.completedFuture(ToolResult.of("{\"success\":true,\"message\":\"ok\"}"));
+        }
+        @Override public CompletableFuture<TaskStatus> getTaskStatus(McpPrincipal p, UUID id, String taskId) {
+            return CompletableFuture.completedFuture(new TaskStatus("t1", "running", "goto 0/1"));
+        }
+        @Override public CompletableFuture<Void> stopTask(McpPrincipal p, UUID id, String taskId) {
+            return CompletableFuture.completedFuture(null);
+        }
+    }
+
+    private static final String TOKEN = "secret-token";
+    private ServerMcpServer server;
+    private String url;
+    private final HttpClient http = HttpClient.newHttpClient();
+
+    @BeforeEach
+    void setUp() throws Exception {
+        McpNetConfig cfg = new McpNetConfig(true, "127.0.0.1", 0, 64 * 1024, 16, 32, 4, 10, 1000);
+        AuthTokens tokens = new AuthTokens(Map.of(TOKEN, McpPrincipal.admin("mcp-admin")));
+        server = new ServerMcpServer(cfg, new MockActuator(), tokens, SecurityPolicy.defaults());
+        server.start();
+        url = "http://127.0.0.1:" + server.boundPort() + "/mcp";
+    }
+
+    @AfterEach
+    void tearDown() {
+        server.stop();
+    }
+
+    private HttpResponse<String> post(String body, String token) throws Exception {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+        if (token != null) b.header("Authorization", "Bearer " + token);
+        return http.send(b.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    }
+
+    private JsonObject rpc(String method, String params) throws Exception {
+        String body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"" + method + "\""
+                + (params == null ? "" : ",\"params\":" + params) + "}";
+        HttpResponse<String> r = post(body, TOKEN);
+        assertEquals(200, r.statusCode(), "body=" + r.body());
+        return JsonParser.parseString(r.body()).getAsJsonObject();
+    }
+
+    @Test
+    void fullAcceptanceFlow() throws Exception {
+        // initialize
+        JsonObject init = rpc("initialize", "{\"protocolVersion\":\"2025-06-18\"}");
+        assertEquals("numen-server-mcp", init.getAsJsonObject("result").getAsJsonObject("serverInfo").get("name").getAsString());
+
+        // notifications/initialized (as a notification: no id -> 202, no body)
+        HttpResponse<String> note = post("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", TOKEN);
+        assertEquals(202, note.statusCode());
+
+        // tools/list contains the management tools
+        JsonObject list = rpc("tools/list", null);
+        String toolsJson = list.getAsJsonObject("result").get("tools").toString();
+        assertTrue(toolsJson.contains("acquire_control"), toolsJson);
+        assertTrue(toolsJson.contains("list_companions"));
+        assertTrue(toolsJson.contains("task_status"));
+
+        // acquire_control -> lease_id
+        JsonObject acq = rpc("tools/call", "{\"name\":\"acquire_control\",\"arguments\":{\"companion\":\"Bot\"}}");
+        String acqText = acq.getAsJsonObject("result").getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString();
+        assertTrue(acqText.contains("lease-xyz"), acqText);
+
+        // goto -> task_id
+        JsonObject go = rpc("tools/call",
+                "{\"name\":\"goto\",\"arguments\":{\"companion\":\"Bot\",\"lease_id\":\"lease-xyz\",\"x\":-319,\"z\":180}}");
+        JsonObject goResult = go.getAsJsonObject("result");
+        assertFalse(goResult.get("isError").getAsBoolean());
+        assertTrue(goResult.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString().contains("t1"));
+
+        // task_status -> running
+        JsonObject st = rpc("tools/call", "{\"name\":\"task_status\",\"arguments\":{\"companion\":\"Bot\"}}");
+        assertTrue(st.getAsJsonObject("result").getAsJsonArray("content").get(0).getAsJsonObject()
+                .get("text").getAsString().contains("running"));
+
+        // release_control
+        JsonObject rel = rpc("tools/call",
+                "{\"name\":\"release_control\",\"arguments\":{\"companion\":\"Bot\",\"lease_id\":\"lease-xyz\"}}");
+        assertFalse(rel.getAsJsonObject("result").get("isError").getAsBoolean());
+    }
+
+    @Test
+    void rejectsMissingAndBadBearer() throws Exception {
+        String body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}";
+        assertEquals(401, post(body, null).statusCode(), "no token");
+        assertEquals(401, post(body, "wrong").statusCode(), "bad token");
+        assertEquals(200, post(body, TOKEN).statusCode(), "good token");
+    }
+
+    @Test
+    void rejectsQueryStringToken() throws Exception {
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url + "?token=" + TOKEN))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"))
+                .build();
+        assertEquals(401, http.send(req, HttpResponse.BodyHandlers.ofString()).statusCode(),
+                "query-string tokens are never accepted");
+    }
+
+    @Test
+    void strictProtocolErrors() throws Exception {
+        // bad jsonrpc version
+        JsonObject bad = JsonParser.parseString(post("{\"jsonrpc\":\"1.0\",\"id\":1,\"method\":\"ping\"}", TOKEN).body()).getAsJsonObject();
+        assertEquals(-32600, bad.getAsJsonObject("error").get("code").getAsInt());
+        // unknown method
+        JsonObject unk = rpc("does/not/exist", null);
+        assertEquals(-32601, unk.getAsJsonObject("error").get("code").getAsInt());
+        // parse error
+        JsonObject parse = JsonParser.parseString(post("not json", TOKEN).body()).getAsJsonObject();
+        assertEquals(-32700, parse.getAsJsonObject("error").get("code").getAsInt());
+    }
+
+    @Test
+    void enforcesBodyAndBatchLimits() throws Exception {
+        // oversized body (> 64 KiB)
+        String big = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\",\"pad\":\"" + "x".repeat(70 * 1024) + "\"}";
+        assertEquals(413, post(big, TOKEN).statusCode());
+        // batch too large (> 16)
+        StringBuilder batch = new StringBuilder("[");
+        for (int i = 0; i < 20; i++) batch.append(i > 0 ? "," : "").append("{\"jsonrpc\":\"2.0\",\"id\":").append(i).append(",\"method\":\"ping\"}");
+        batch.append("]");
+        JsonObject b = JsonParser.parseString(post(batch.toString(), TOKEN).body()).getAsJsonObject();
+        assertEquals(-32600, b.getAsJsonObject("error").get("code").getAsInt());
+    }
+
+    @Test
+    void refusesWildcardBind() {
+        McpNetConfig wild = new McpNetConfig(true, "0.0.0.0", 0, 64 * 1024, 16, 32, 4, 10, 1000);
+        ServerMcpServer s = new ServerMcpServer(wild, new MockActuator(),
+                new AuthTokens(Map.of("t", McpPrincipal.admin("a"))), SecurityPolicy.defaults());
+        try {
+            s.start();
+            org.junit.jupiter.api.Assertions.fail("should refuse wildcard bind");
+        } catch (Exception expected) {
+            assertTrue(expected.getMessage().contains("wildcard"), expected.getMessage());
+        }
+    }
+
+    @Test
+    void refusesNonLoopbackWithoutTokens() {
+        McpNetConfig lan = new McpNetConfig(true, "10.0.0.5", 0, 64 * 1024, 16, 32, 4, 10, 1000);
+        ServerMcpServer s = new ServerMcpServer(lan, new MockActuator(), AuthTokens.empty(), SecurityPolicy.defaults());
+        try {
+            s.start();
+            org.junit.jupiter.api.Assertions.fail("should refuse non-loopback without tokens");
+        } catch (Exception expected) {
+            assertTrue(expected.getMessage().contains("non-loopback"), expected.getMessage());
+        }
+    }
+}
