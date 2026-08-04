@@ -9,7 +9,14 @@
 
 它不是站在原地执行几条命令的 Worker，也不是 ArmorStand 外壳。伴生体拥有服务器原生玩家身份、物理、背包、拾取、容器、死亡、复活和 playerdata，并通过同一套安全执行层接受控制。
 
-> 当前目标：Minecraft 1.20.1、Forge 47.x、Mohist 1.20.1。无需客户端安装本模组。项目仍处于生产接入前的工程验证阶段，暂未发布 Release。
+> 当前目标：Minecraft 1.20.1、Forge 47.x、Mohist 1.20.1。无需客户端安装本模组。已发布 **pre-release**（工程验证版），正式 Release 尚未发布。
+
+## 快速开始
+
+1. 从 [Releases](https://github.com/Wayne1145/numen-server-player/releases) 下载 `numen-forge-1.20.1-0.0.10-all.jar`；
+2. 放入服务器 `mods/` 并重启（默认配置安全：MCP 关闭）；
+3. 控制台 `/numen server summon MyBot` 即可召唤 AI 玩家；
+4. 完整安装、配置、MCP/API 用法见 **[`docs/USAGE.md`](docs/USAGE.md)**。
 
 ## 核心能力
 
