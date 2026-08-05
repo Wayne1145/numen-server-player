@@ -7,6 +7,8 @@ import net.minecraft.network.FriendlyByteBuf;
 import com.dwinovo.numen.network.NumenPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.PacketDistributor;
@@ -45,13 +47,18 @@ public final class ForgeNetworkChannel implements INetworkChannel {
 
     private static final String PROTOCOL_VERSION = "1";
 
-    private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
-            new ResourceLocation(Constants.MOD_ID, "main"),
-            () -> PROTOCOL_VERSION,
-            // 服务端专用模组：客户端未安装本模组时，握手里该通道版本为 null，必须放行；
-            // 已安装的客户端仍按 "1" 精确匹配。
-            v -> v == null || PROTOCOL_VERSION.equals(v),
-            v -> v == null || PROTOCOL_VERSION.equals(v));
+    // 服务端专用模组：物理服务端【不注册】任何网络通道。
+    // Forge 通道握手对 null 版本硬性拒绝（NetworkInstance.acceptVersion(null)==false，谓词不会被执行），
+    // 且客户端侧对服务器通道列表没有豁免——只要服务器注册了通道，未安装本模组的客户端就会被
+    // "mismatched mod channel list" 踢出。服务端由 MCP/HTTP 控制，无需向客户端发包，
+    // 因此仅在物理客户端注册；谓词保留 null 容忍，避免“客户端装了模组、服务器没有”的反向拒绝。
+    private static final SimpleChannel CHANNEL = FMLEnvironment.dist == Dist.CLIENT
+            ? NetworkRegistry.newSimpleChannel(
+                    new ResourceLocation(Constants.MOD_ID, "main"),
+                    () -> PROTOCOL_VERSION,
+                    v -> v == null || PROTOCOL_VERSION.equals(v),
+                    v -> v == null || PROTOCOL_VERSION.equals(v))
+            : null;
 
     /** A single opaque message multiplexing every payload: id + serialised bytes. */
     private record Envelope(ResourceLocation id, byte[] data) {}
@@ -69,6 +76,9 @@ public final class ForgeNetworkChannel implements INetworkChannel {
 
     /** Default constructor used by {@code ServiceLoader}; wires the single envelope message. */
     public ForgeNetworkChannel() {
+        if (CHANNEL == null) {
+            return; // 服务端：不注册通道，也就没有消息可注册。
+        }
         CHANNEL.registerMessage(0, Envelope.class,
                 ForgeNetworkChannel::encodeEnvelope,
                 ForgeNetworkChannel::decodeEnvelope,
@@ -109,11 +119,17 @@ public final class ForgeNetworkChannel implements INetworkChannel {
 
     @Override
     public void sendToServer(NumenPayload payload) {
+        if (CHANNEL == null) {
+            return; // 服务端：没有通道，不会向外发送任何网络消息。
+        }
         CHANNEL.sendToServer(new Envelope(payload.id(), serialise(payload)));
     }
 
     @Override
     public void sendToPlayer(ServerPlayer player, NumenPayload payload) {
+        if (CHANNEL == null) {
+            return; // 服务端：没有通道，不会向玩家发送任何网络消息。
+        }
         // Classic API: target first, message second; PLAYER.with takes a Supplier<ServerPlayer>.
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new Envelope(payload.id(), serialise(payload)));
     }
