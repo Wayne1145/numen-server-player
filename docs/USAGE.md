@@ -15,7 +15,7 @@
 2. 校验哈希（以 Release 页面标注为准）：
    ```bash
    sha256sum numen-forge-1.20.1-0.0.10-all.jar
-   # v0.0.10-pre.2 应输出 25c21d51512ddc324931c17720827340bb93dab70aff9be70379d26866637943
+   # v0.0.10-pre.3 应输出 b18b6d9cb7610b0afea965c936eb6bf7ef09439b799a11087b5bb26ced6ad897
    ```
 3. 放入服务器 `mods/` 目录。
 4. 重启服务器（**建议先备份世界**，并在副本环境先验证）。
@@ -217,7 +217,7 @@ API Key **不放在配置里**，按以下顺序解析：
 
 | 现象 | 原因与处理 |
 |---|---|
-| 客户端提示“缺少模组/需安装模组”无法加入 | 使用了旧版（v0.0.10-pre.1 之前）：`mods.toml` 缺少 `IGNORE_SERVER_VERSION`。升级到 v0.0.10-pre.2 及以上，客户端无需安装 |
+| 客户端提示“缺少模组/需安装模组”无法加入 | ① 旧版（v0.0.10-pre.1 之前）：`mods.toml` 缺少 `IGNORE_SERVER_VERSION`；② pre.2：mod 列表检查已通过，但网络通道 `numen_api:main` 握手仍拒绝未安装模组的客户端。升级到 **v0.0.10-pre.3 及以上**即可，客户端无需安装 |
 | MCP 请求 401 | Token 错误 / 未配置 principal；检查 `server_control.json` |
 | MCP 连接 404 / 拒绝 | MCP 未启用（默认关闭）；检查配置与端口 |
 | 日志没有 `[numen-mcp]` | 同上 |
