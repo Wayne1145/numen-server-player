@@ -51,6 +51,15 @@ repositories {
             resolutionStrategy.cacheChangingModulesFor(0, 'seconds')
         }
     }
+    // 本地发布仓库：构建时用 -Plocal_maven_url 显式指定（如 file:///D:/.../local-maven）。
+    // 先发布 numen-api 到该目录，再构建本工程即可解析同一份引擎产物。
+    def localMavenUrl = findProperty('local_maven_url')
+    if (localMavenUrl) {
+        maven {
+            name = 'numenLocalMaven'
+            url = uri(localMavenUrl)
+        }
+    }
     // Published numen-api engine — always resolved from the public raw maven so
     // this build (and CI) uses exactly what's been pushed, never a stale local copy.
     maven {

@@ -51,12 +51,19 @@ sourceSets.main.resources.exclude '.cache/**'
 // Bundle numen-api into core's Forge jar (Jar-in-Jar).
 jarJar.enable()
 
+// 本地 SNAPSHOT 引擎会先发布再构建 core；禁止 Gradle 长期缓存旧快照。
+configurations {
+    configureEach {
+        resolutionStrategy.cacheChangingModulesFor 0, 'seconds'
+    }
+}
+
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     // The numen-api engine (matching-loader artifact, so the mcgradleconventions
     // loader attribute resolves). compileOnly: the api classes are provided at
     // runtime by the bundled numen-api mod, not by core's own jar.
-    compileOnly("com.dwinovo.numen:numen-api-forge-1.20.1:0.0.7-SNAPSHOT") { changing = true }
+    compileOnly "com.dwinovo.numen:numen-api-forge-1.20.1:0.0.7-fix1"
     // Dev-runtime copy of the engine mod: core's mods.toml marks numen_api as a
     // mandatory dependency, so FML refuses to boot any run (incl. the Data run)
     // without it on the classpath. fg.deobf remaps the published SRG jar back to
@@ -64,14 +71,13 @@ dependencies {
     // published metadata carries its own dev-mapped forge dependency
     // (net.minecraftforge:forge:*_mapped_official_*), which no repo can serve —
     // the loader is already on the classpath here anyway.
-    runtimeOnly(fg.deobf("com.dwinovo.numen:numen-api-forge-1.20.1:0.0.7-SNAPSHOT")) {
-        changing = true
+    runtimeOnly fg.deobf("com.dwinovo.numen:numen-api-forge-1.20.1:0.0.7-fix1") {
         transitive = false
     }
     // Bundle the Forge build of the api into META-INF/jarjar/ so one file ships both mods.
     // transitive=false: only the api jar is nested — its Forge/Minecraft deps are provided
     // by the loader at runtime and must NOT be embedded (that would bloat the jar to ~94MB).
-    jarJar(group: 'com.dwinovo.numen', name: 'numen-api-forge-1.20.1', version: '0.0.7-SNAPSHOT') {
+    jarJar(group: 'com.dwinovo.numen', name: 'numen-api-forge-1.20.1', version: '0.0.7-fix1') {
         transitive = false
         jarJar.ranged(it, '[0.0.0,)')
     }

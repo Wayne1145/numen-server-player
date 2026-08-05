@@ -217,6 +217,7 @@ API Key **不放在配置里**，按以下顺序解析：
 
 | 现象 | 原因与处理 |
 |---|---|
+| 客户端提示“缺少模组/需安装模组”无法加入 | 使用了旧版（v0.0.10-pre.1 之前）：`mods.toml` 缺少 `IGNORE_SERVER_VERSION`。升级到 v0.0.10-pre.2 及以上，客户端无需安装 |
 | MCP 请求 401 | Token 错误 / 未配置 principal；检查 `server_control.json` |
 | MCP 连接 404 / 拒绝 | MCP 未启用（默认关闭）；检查配置与端口 |
 | 日志没有 `[numen-mcp]` | 同上 |
