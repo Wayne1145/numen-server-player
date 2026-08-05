@@ -48,8 +48,10 @@ public final class ForgeNetworkChannel implements INetworkChannel {
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(Constants.MOD_ID, "main"),
             () -> PROTOCOL_VERSION,
-            PROTOCOL_VERSION::equals,
-            PROTOCOL_VERSION::equals);
+            // 服务端专用模组：客户端未安装本模组时，握手里该通道版本为 null，必须放行；
+            // 已安装的客户端仍按 "1" 精确匹配。
+            v -> v == null || PROTOCOL_VERSION.equals(v),
+            v -> v == null || PROTOCOL_VERSION.equals(v));
 
     /** A single opaque message multiplexing every payload: id + serialised bytes. */
     private record Envelope(ResourceLocation id, byte[] data) {}
