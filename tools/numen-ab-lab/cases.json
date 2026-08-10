@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "model": "deepseek-v4-flash",
+  "profiles": {
+    "generic": {
+      "description": "模拟通用外部 Agent：只给 MCP 使用说明，不提供 Numen 行为纪律与长期记忆。"
+    },
+    "numen": {
+      "description": "使用从 NumenPrompts 提炼的专用行动纪律：感知、行动、验证、失败恢复。"
+    }
+  },
+  "cases": [
+    {
+      "id": "move_east_6",
+      "companion": "ABWalker",
+      "request": "请让你的 Minecraft 身体从当前位置向东移动 6 格。必须实际行动，完成后确认最终位置，再简短汇报。",
+      "reset": {
+        "relative_target": {"dx": 6, "dz": 0},
+        "platform_radius": 12
+      },
+      "pass": {
+        "horizontal_distance_to_target_max": 2.5,
+        "must_call": ["goto", "get_self_status"]
+      }
+    }
+  ]
+}

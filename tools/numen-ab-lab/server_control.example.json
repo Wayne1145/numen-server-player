@@ -1,0 +1,39 @@
+{
+  "policy": {
+    "enabled_capabilities": [
+      "SERVER_READ_ONLY",
+      "SERVER_BODY_ACTION",
+      "DESTRUCTIVE"
+    ],
+    "allowed_dimensions": [
+      "minecraft:overworld"
+    ],
+    "allowed_namespaces": [
+      "minecraft"
+    ],
+    "lease_ttl_ms": 120000,
+    "max_calls_per_minute_per_principal": 600,
+    "max_calls_per_minute_per_companion": 300
+  },
+  "principals": [
+    {
+      "token": "REPLACE_WITH_A_LONG_RANDOM_TOKEN",
+      "id": "numen-ab-brain",
+      "role": "ADMIN"
+    }
+  ],
+  "mcp": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 25585
+  },
+  "api_agent": {
+    "enabled": false,
+    "provider": "openai",
+    "model": "",
+    "base_url": "",
+    "api_key_env": "NUMEN_API_KEY",
+    "max_turns": 12,
+    "request_timeout_seconds": 120
+  }
+}

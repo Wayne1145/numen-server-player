@@ -1,0 +1,8 @@
+# 运行数据与本地凭据不入库
+sessions/
+results/
+checkpoints/
+locks/
+__pycache__/
+*.pyc
+server_control.json
