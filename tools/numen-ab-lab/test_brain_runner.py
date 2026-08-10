@@ -39,6 +39,36 @@ class ParseDecisionTest(unittest.TestCase):
 
 
 class ResilienceTest(unittest.TestCase):
+    def test_ensure_llm_ready_requires_key_for_official_endpoint(self):
+        import brain_runner
+        original_key = brain_runner.LLM_KEY
+        original_url = brain_runner.LLM_URL
+        try:
+            brain_runner.LLM_KEY = ""
+            brain_runner.LLM_URL = "https://api.deepseek.com/v1/chat/completions"
+            with self.assertRaisesRegex(RuntimeError, "NUMEN_DEEPSEEK_KEY"):
+                brain_runner.ensure_llm_ready()
+
+            brain_runner.LLM_KEY = "sk-test"
+            brain_runner.ensure_llm_ready()  # 有 key 不抛
+
+            brain_runner.LLM_KEY = ""
+            brain_runner.LLM_URL = "http://127.0.0.1:9999/v1"  # 非官方端点(如本地代理)不强制
+            brain_runner.ensure_llm_ready()
+        finally:
+            brain_runner.LLM_KEY = original_key
+            brain_runner.LLM_URL = original_url
+
+    def test_llm_headers_carry_bearer_key(self):
+        import brain_runner
+        original = brain_runner.LLM_KEY
+        try:
+            brain_runner.LLM_KEY = "sk-abc"
+            brain_runner.LLM_HEADERS = {"Authorization": "Bearer sk-abc"}
+            self.assertEqual("Bearer sk-abc", brain_runner.LLM_HEADERS["Authorization"])
+        finally:
+            brain_runner.LLM_KEY = original
+
     def test_mcp_call_raises_on_is_error_result(self):
         client = McpClient()
 

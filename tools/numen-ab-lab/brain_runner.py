@@ -21,7 +21,19 @@ from persistent_brain import fsync_dir
 ROOT = Path(__file__).resolve().parent
 MCP_URL = os.environ.get("NUMEN_MCP_URL", "http://127.0.0.1:25585/mcp")
 MCP_TOKEN = os.environ.get("NUMEN_MCP_TOKEN", "")
-LLM_URL = os.environ.get("NUMEN_LLM_URL", "http://127.0.0.1:18632/v1/chat/completions")
+# 直连 DeepSeek（不再经过本地 api_proxy：避免被注入 HA 家居工具与八千代人格）
+LLM_URL = os.environ.get("NUMEN_LLM_URL", "https://api.deepseek.com/v1/chat/completions")
+LLM_MODEL = os.environ.get("NUMEN_LLM_MODEL", "deepseek-v4-flash")
+LLM_KEY = os.environ.get("NUMEN_DEEPSEEK_KEY", "")
+LLM_HEADERS = {"Authorization": f"Bearer {LLM_KEY}"}
+
+
+def ensure_llm_ready() -> None:
+    """直连 DeepSeek 官方端点必须带 API Key；仅在真实发起模型请求前检查，
+    避免模块导入即失败（单元测试不调用模型）。"""
+    if not LLM_KEY and LLM_URL.startswith("https://api.deepseek.com"):
+        raise RuntimeError(
+            "NUMEN_DEEPSEEK_KEY 环境变量未设置：Numen 大脑已直连 DeepSeek，需要提供 API Key")
 RCON_PORT = int(os.environ.get("NUMEN_RCON_PORT", "25586"))
 RCON_PASSWORD = os.environ.get("NUMEN_RCON_PASSWORD", "")
 MAX_ROUNDS = 8
@@ -278,15 +290,16 @@ def model_tools(live_tools: list[dict[str, Any]]) -> tuple[list[dict[str, Any]],
 
 def llm_turn(messages: list[dict[str, str]], system_prompt: str,
              tools: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
+    ensure_llm_ready()
     tool_text = json.dumps(tools, ensure_ascii=False, separators=(",", ":"))
     full_system = system_prompt + "\n<available_tools>" + tool_text + "</available_tools>"
 
     def request_once() -> dict[str, Any]:
         return post_json(LLM_URL, {
-            "model": "cloud", "stream": False, "temperature": 0,
+            "model": LLM_MODEL, "stream": False, "temperature": 0,
             "max_tokens": 500,
             "messages": [{"role": "system", "content": full_system}, *messages],
-        }, timeout=150)
+        }, headers=LLM_HEADERS, timeout=150)
 
     response = retry_transient(request_once, attempts=2, delay_seconds=3)
     choice = response["choices"][0]["message"]
@@ -367,7 +380,7 @@ def run_case(profile: str) -> dict[str, Any]:
             "version": 2,
             "state": state,
             "profile": profile,
-            "model": "deepseek-v4-flash via local cloud route",
+            "model": "deepseek-v4-flash (direct)",
             "case_id": case["id"],
             "companion": companion,
             "elapsed_seconds": time.monotonic() - started,
@@ -433,7 +446,7 @@ def run_case(profile: str) -> dict[str, Any]:
         "version": 2,
         "state": "completed" if final_text else "max_rounds",
         "profile": profile,
-        "model": "deepseek-v4-flash via local cloud route",
+        "model": "deepseek-v4-flash (direct)",
         "case_id": case["id"],
         "companion": companion,
         "started_at": dt.datetime.now(dt.timezone.utc).isoformat(),

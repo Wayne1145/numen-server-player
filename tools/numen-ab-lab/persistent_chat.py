@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from brain_runner import LLM_URL, post_json, retry_transient
+from brain_runner import LLM_URL, LLM_MODEL, LLM_HEADERS, ensure_llm_ready, post_json, retry_transient
 from persistent_brain import BrainSessionStore, run_persistent_turn
 
 SYSTEM_PROMPT = """你是与一个 Minecraft Numen 身体绑定的长期同伴大脑。
@@ -14,14 +14,15 @@ SYSTEM_PROMPT = """你是与一个 Minecraft Numen 身体绑定的长期同伴�
 
 
 def model_call(messages: list[dict[str, str]]) -> str:
+    ensure_llm_ready()
     def request_once():
         return post_json(LLM_URL, {
-            "model": "cloud",
+            "model": LLM_MODEL,
             "stream": False,
             "temperature": 0,
             "max_tokens": 120,
             "messages": [{"role": "system", "content": SYSTEM_PROMPT}, *messages],
-        }, timeout=150)
+        }, headers=LLM_HEADERS, timeout=150)
 
     response = retry_transient(request_once, attempts=2, delay_seconds=3)
     message = response["choices"][0]["message"]

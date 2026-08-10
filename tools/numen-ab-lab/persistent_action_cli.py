@@ -18,7 +18,10 @@ from event_inbox import EventInbox
 from world_memory import WorldMemoryStore
 from brain_runner import (
     LLM_URL,
+    LLM_MODEL,
+    LLM_HEADERS,
     McpClient,
+    ensure_llm_ready,
     model_tools,
     post_json,
     retry_transient,
@@ -60,7 +63,7 @@ def create_model_adapter(transport: Callable[[dict[str, Any]], dict[str, Any]],
     def model(messages: list[dict[str, str]], tools: list[dict[str, Any]]) -> str:
         tool_text = json.dumps(tools, ensure_ascii=False, separators=(",", ":"))
         payload = {
-            "model": "cloud",
+            "model": LLM_MODEL,
             "stream": False,
             "temperature": 0,
             "max_tokens": 600,
@@ -138,7 +141,7 @@ def attach_events(message: str, events: list[dict[str, Any]]) -> str:
 
 def live_transport(payload: dict[str, Any]) -> dict[str, Any]:
     return retry_transient(
-        lambda: post_json(LLM_URL, payload, timeout=150),
+        lambda: post_json(LLM_URL, payload, headers=LLM_HEADERS, timeout=150),
         attempts=2,
         delay_seconds=3,
     )
@@ -152,7 +155,7 @@ def create_compactor(transport: Callable[[dict[str, Any]], dict[str, Any]]) -> C
         history_text = "\n".join(
             f"[{m.get('role', '?')}] {m.get('content', '')}" for m in messages)
         payload = {
-            "model": "cloud",
+            "model": LLM_MODEL,
             "stream": False,
             "temperature": 0,
             "max_tokens": 600,
