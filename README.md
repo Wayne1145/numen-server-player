@@ -87,6 +87,10 @@ MCP 和 API Agent 不是两套旁路。它们最终使用相同的动作、权�
 
 ## 构建
 
+> **重要**：`minecraft-numen` 依赖 fork 的引擎 `numen-api-common-1.20.1:0.0.7-fix3`。
+> 公共回退源是**本仓库的 `maven/` 目录**（`raw.githubusercontent.com/Wayne1145/numen-server-player/main/maven`），
+> 其中已发布 fork 引擎产物（含服务端增强）。两种构建方式任选：
+
 ### 前置条件
 
 - JDK 17（构建 Forge 1.20.1）
@@ -94,7 +98,16 @@ MCP 和 API Agent 不是两套旁路。它们最终使用相同的动作、权�
 - 可访问 Forge/Minecraft Maven 仓库的网络
 - 建议至少 4 GiB 可用构建内存
 
-### Linux / WSL
+### 方式 A：使用公共 maven（最简单，推荐他人构建）
+
+直接构建即可，引擎从本仓库 `maven/` 远程解析：
+
+```bash
+cd components/minecraft-numen
+./gradlew :common:build :forge:build --no-daemon --console=plain
+```
+
+### 方式 B：本地发布引擎（开发迭代，改动引擎代码时使用）
 
 ```bash
 # 1. 构建并发布引擎到仓库内本地 Maven 目录
@@ -109,6 +122,8 @@ cd ../minecraft-numen
   -Plocal_maven_url="$(realpath ../../local-maven)" \
   --no-daemon --console=plain
 ```
+
+> 引擎有改动时，记得把新产物同步发布到 `maven/` 目录并提交（见 `maven/README.md`）。
 
 最终 Forge JAR 位于：
 

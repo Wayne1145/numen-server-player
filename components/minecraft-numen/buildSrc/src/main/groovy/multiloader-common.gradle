@@ -60,11 +60,14 @@ repositories {
             url = uri(localMavenUrl)
         }
     }
-    // Published numen-api engine — always resolved from the public raw maven so
-    // this build (and CI) uses exactly what's been pushed, never a stale local copy.
+    // Published numen-api engine — fork remote: our own raw maven under this repo
+    // (maven/ directory). This build (and any clone) resolves exactly what we
+    // pushed, including the server-side enhancements (terminal results,
+    // idempotent dispatch, event buffer). Upstream Dwinovo/numen-maven does NOT
+    // carry our 0.0.7-fix3 coordinate, so keep this pointing at our repo.
     maven {
         name = 'numenRemote'
-        url = 'https://raw.githubusercontent.com/Dwinovo/numen-maven/main'
+        url = 'https://raw.githubusercontent.com/Wayne1145/numen-server-player/main/maven'
     }
     // https://docs.gradle.org/current/userguide/declaring_repositories.html#declaring_content_exclusively_found_in_one_repository
     exclusiveContent {
