@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -25,9 +26,9 @@ from brain_runner import (
 from persistent_brain import BrainSessionStore, compact_history, safe_segment
 
 ROOT = Path(__file__).resolve().parent
-COMPACT_MAX_MESSAGES = 60
-COMPACT_MAX_CHARS = 18000
-COMPACT_PROMPT = """你是长期记忆摘要器。把下面的历史对话压缩成简洁的中文要点，必须保留：
+COMPACT_MAX_MESSAGES = int(os.environ.get("NUMEN_COMPACT_MAX_MESSAGES", "60"))
+COMPACT_MAX_CHARS = int(os.environ.get("NUMEN_COMPACT_MAX_CHARS", "18000"))
+COMPACT_PROMPT = """请把下面的历史对话压缩成简洁的中文要点摘要，必须保留：
 识别词/口令、任务目标与完成状态、已到达或使用过的位置、同伴身份信息、重要结论和未完成事项。
 不要编造新事实；只输出摘要正文，不要任何前后缀。"""
 SYSTEM_PROMPT = """你是一个与 Minecraft Numen 真实玩家身体长期绑定的同伴大脑。
@@ -146,12 +147,16 @@ def live_transport(payload: dict[str, Any]) -> dict[str, Any]:
 def create_compactor(transport: Callable[[dict[str, Any]], dict[str, Any]]) -> Callable:
     """把历史压缩成摘要文本；用于上下文预算触发时的 compact_history。"""
     def compact_model(messages: list[dict[str, str]]) -> str:
+        # 实测：deepseek-v4-flash 对 system+长消息列表 的压缩指令返回空 content，
+        # 对单条 user 拼接消息有效——因此把历史拼进一条 user 消息。
+        history_text = "\n".join(
+            f"[{m.get('role', '?')}] {m.get('content', '')}" for m in messages)
         payload = {
             "model": "cloud",
             "stream": False,
             "temperature": 0,
             "max_tokens": 600,
-            "messages": [{"role": "system", "content": COMPACT_PROMPT}, *messages],
+            "messages": [{"role": "user", "content": COMPACT_PROMPT + "\n\n" + history_text}],
         }
         response = transport(payload)
         message = response["choices"][0]["message"]

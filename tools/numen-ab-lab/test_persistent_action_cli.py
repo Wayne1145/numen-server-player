@@ -5,6 +5,7 @@ from pathlib import Path
 from persistent_action_cli import (
     attach_events,
     build_paths,
+    create_compactor,
     create_model_adapter,
     load_persona,
     make_load_skill,
@@ -75,6 +76,32 @@ class PersistentActionCliTest(unittest.TestCase):
         self.assertIn("早上好", merged)
         self.assertIn("去砍树", merged)
         self.assertEqual("去砍树", attach_events("去砍树", []))
+
+    def test_compactor_sends_single_user_message_with_history(self):
+        observed = {}
+
+        def transport(payload):
+            observed.update(payload)
+            return {"choices": [{"message": {"content": "口令：A-1"}}]}
+
+        compactor = create_compactor(transport)
+        out = compactor([
+            {"role": "user", "content": "口令是 A-1"},
+            {"role": "assistant", "content": "记住了"},
+        ])
+
+        self.assertEqual("口令：A-1", out)
+        messages = observed["messages"]
+        self.assertEqual(1, len(messages), "压缩必须用单条 user 消息（deepseek 兼容性）")
+        self.assertEqual("user", messages[0]["role"])
+        self.assertIn("口令是 A-1", messages[0]["content"])
+
+    def test_compactor_rejects_empty_summary(self):
+        compactor = create_compactor(
+            lambda _payload: {"choices": [{"message": {"content": ""}}]}
+        )
+        with self.assertRaisesRegex(ValueError, "empty summary"):
+            compactor([{"role": "user", "content": "历史"}])
 
     def test_paths_are_keyed_by_server_and_uuid_not_display_name(self):
         with tempfile.TemporaryDirectory() as tmp:

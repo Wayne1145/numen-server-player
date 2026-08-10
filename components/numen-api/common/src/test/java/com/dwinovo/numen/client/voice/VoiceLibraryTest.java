@@ -130,9 +130,9 @@ class VoiceLibraryTest {
     @Test
     void enabledFlagPersists() {
         VoiceLibrary lib = fresh();
-        assertFalse(lib.enabled());   // 缺省关闭
-        lib.setEnabled(true);
-        assertTrue(fresh().enabled());
+        assertTrue(lib.enabled());    // 缺省开启（见实现 load() 注释）
+        lib.setEnabled(false);
+        assertFalse(fresh().enabled());
     }
 
     @Test
@@ -142,12 +142,12 @@ class VoiceLibraryTest {
         VoiceLibrary.Entry e = openai(lib, "A");
         lib.assign(u, e.id());
         assertEquals(e.id(), lib.assignedEntry(u));
-        assertNull(lib.resolve(u));           // 总开关关闭 → 静音
-        lib.setEnabled(true);
-        assertEquals(e.id(), lib.resolve(u).id());
+        assertEquals(e.id(), lib.resolve(u).id());   // 缺省开 → 绑定即出声
+        lib.setEnabled(false);
+        assertNull(lib.resolve(u));                  // 总开关关闭 → 静音
 
-        VoiceLibrary reloaded = fresh();      // 绑定与开关一起持久化
-        assertEquals(e.id(), reloaded.resolve(u).id());
+        VoiceLibrary reloaded = fresh();             // 绑定与开关一起持久化
+        assertNull(reloaded.resolve(u));
     }
 
     @Test
@@ -207,7 +207,7 @@ class VoiceLibraryTest {
     void missingFileStartsEmpty() {
         VoiceLibrary lib = fresh();
         assertTrue(lib.list().isEmpty());
-        assertFalse(lib.enabled());
+        assertTrue(lib.enabled());   // 与实现注释一致：缺省开，玩家配好声线就该出声
         assertNull(lib.resolve(UUID.randomUUID()));
     }
 }
