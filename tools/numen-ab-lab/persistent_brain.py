@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -36,19 +37,25 @@ def _reject_path_separators(*values: str) -> None:
 
 
 class BrainSessionStore:
-    """以 server_id + companion UUID 分区的追加式 JSONL 会话。"""
+    """以 server_id + companion UUID 分区的追加式 JSONL 会话。
+
+    记录类型：消息批次 {"messages":[...], "transaction_id"?}、旧式单消息
+    {"role","content"}、摘要 {"type":"summary","content"}。模型可见视图
+    始终从最近一条摘要开始（作为 system 消息），摘要之前的旧历史只保留
+    在文件里供审计，不再进入上下文。
+    """
 
     def __init__(self, root: Path, server_id: str, companion_id: str) -> None:
         _reject_path_separators(server_id, companion_id)
         self.path = (root / safe_segment(server_id)
                      / f"{safe_segment(companion_id)}.jsonl")
         self._transactions: set[str] = set()
-        self._messages = self._load()
+        self._records: list[dict[str, Any]] = []
+        self._load()
 
-    def _load(self) -> list[dict[str, Any]]:
+    def _load(self) -> None:
         if not self.path.exists():
-            return []
-        messages: list[dict[str, Any]] = []
+            return
         lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
         for index, line in enumerate(lines):
             if not line.strip():
@@ -59,17 +66,24 @@ class BrainSessionStore:
                 if index == len(lines) - 1:
                     break
                 raise
-            batch = record.get("messages") if isinstance(record, dict) else None
-            transaction_id = record.get("transaction_id") if isinstance(record, dict) else None
+            if not isinstance(record, dict):
+                raise ValueError(f"invalid persisted record at line {index + 1}")
+            transaction_id = record.get("transaction_id")
             if isinstance(transaction_id, str) and transaction_id:
                 self._transactions.add(transaction_id)
+            if record.get("type") == "summary":
+                if not isinstance(record.get("content"), str):
+                    raise ValueError(f"invalid summary record at line {index + 1}")
+                self._records.append({"type": "summary", "content": record["content"]})
+                continue
+            batch = record.get("messages")
             records = batch if isinstance(batch, list) else [record]
             for message in records:
                 if (not isinstance(message, dict) or message.get("role") not in VALID_ROLES
                         or not isinstance(message.get("content"), str)):
                     raise ValueError(f"invalid persisted message at line {index + 1}")
-                messages.append({"role": message["role"], "content": message["content"]})
-        return messages
+                self._records.append(
+                    {"role": message["role"], "content": message["content"]})
 
     def append(self, role: str, content: str) -> None:
         if role not in VALID_ROLES:
@@ -83,7 +97,7 @@ class BrainSessionStore:
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
-        self._messages.append(message)
+        self._records.append(message)
 
     def append_pair(self, user_content: str, assistant_content: str) -> None:
         """整回合作为一条 JSONL 事务落盘，断电不会留下悬空 user。"""
@@ -117,15 +131,72 @@ class BrainSessionStore:
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
-        self._messages.extend(normalized)
+        self._records.extend(normalized)
+        if transaction_id is not None:
+            self._transactions.add(transaction_id)
+
+    def append_summary(self, content: str, transaction_id: str | None = None) -> None:
+        """追加一条上下文摘要；模型可见视图将从这条摘要开始。"""
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("summary content must be a non-empty string")
+        if transaction_id is not None and transaction_id in self._transactions:
+            return
+        record: dict[str, Any] = {"type": "summary", "content": content}
+        if transaction_id is not None:
+            record["transaction_id"] = transaction_id
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        encoded = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        self._records.append(record)
         if transaction_id is not None:
             self._transactions.add(transaction_id)
 
     def has_transaction(self, transaction_id: str) -> bool:
         return transaction_id in self._transactions
 
+    def summary(self) -> str | None:
+        """最近一条摘要文本；没有摘要时返回 None。"""
+        for record in reversed(self._records):
+            if record.get("type") == "summary":
+                return record["content"]
+        return None
+
     def messages(self) -> list[dict[str, str]]:
-        return [dict(message) for message in self._messages]
+        """模型可见视图：最近摘要(system) + 其后全部消息。"""
+        start = 0
+        for index, record in enumerate(self._records):
+            if record.get("type") == "summary":
+                start = index + 1
+        visible: list[dict[str, str]] = []
+        summary_text = self.summary()
+        if summary_text is not None:
+            visible.append({"role": "system", "content": summary_text})
+        for record in self._records[start:]:
+            visible.append({"role": record["role"], "content": record["content"]})
+        return visible
+
+    def should_compact(self, max_messages: int = 60, max_chars: int = 18000) -> bool:
+        """模型可见视图是否超过消息数或字符预算，需要压缩。"""
+        visible = self.messages()
+        if len(visible) > max_messages:
+            return True
+        return sum(len(message["content"]) for message in visible) > max_chars
+
+
+def compact_history(store: BrainSessionStore, model: Any) -> str | None:
+    """用模型把当前可见历史压缩成摘要；失败时保持历史原样并返回 None。"""
+    try:
+        visible = store.messages()
+        summary_text = model(visible)
+        if not isinstance(summary_text, str) or not summary_text.strip():
+            raise ValueError("model returned empty summary")
+    except Exception:
+        return None
+    store.append_summary(summary_text, transaction_id=str(uuid.uuid4()))
+    return summary_text
 
 
 def run_persistent_turn(store: BrainSessionStore, user_content: str, model: Any) -> str:

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Numen 同伴控制台</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, sans-serif; background: #101418; color: #e6e8eb; margin: 0; }
+  header { padding: 16px 24px; border-bottom: 1px solid #262b31; display: flex; gap: 12px; align-items: center; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  input, select, textarea, button { background: #1a2026; color: #e6e8eb; border: 1px solid #2e363f; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+  button { cursor: pointer; }
+  button:hover { border-color: #4a5560; }
+  main { display: flex; gap: 16px; padding: 16px 24px; height: calc(100vh - 80px); }
+  #companions { width: 240px; overflow: auto; background: #161b21; border: 1px solid #262b31; border-radius: 10px; padding: 12px; }
+  #companions h2 { font-size: 13px; text-transform: uppercase; color: #8a939d; }
+  #companions div { padding: 8px; border-radius: 8px; cursor: pointer; }
+  #companions div:hover { background: #1f252c; }
+  #companions div.active { background: #233042; }
+  #panel { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  #chat { flex: 1; overflow: auto; background: #161b21; border: 1px solid #262b31; border-radius: 10px; padding: 16px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
+  #input-row { display: flex; gap: 8px; }
+  #message { flex: 1; resize: none; height: 64px; }
+  #tabs { display: flex; gap: 8px; }
+  #tabs button { font-size: 13px; }
+  #meta { background: #161b21; border: 1px solid #262b31; border-radius: 10px; padding: 12px; min-height: 120px; overflow: auto; font-size: 13px; color: #b9c1c9; white-space: pre-wrap; }
+  .muted { color: #8a939d; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>月读 · Numen 同伴控制台</h1>
+  <span class="muted">服务器</span>
+  <input id="server" value="numen-ab" size="14">
+  <span class="muted">Token</span>
+  <input id="token" type="password" placeholder="可选">
+  <button onclick="loadCompanions()">刷新同伴</button>
+</header>
+<main>
+  <aside id="companions">
+    <h2>同伴</h2>
+    <div id="companion-list" class="muted">点击刷新获取列表</div>
+  </aside>
+  <section id="panel">
+    <div id="chat">选择左侧同伴开始对话。</div>
+    <div id="input-row">
+      <textarea id="message" placeholder="给同伴的指令，例如：记住识别词，然后走到 x=10 z=0"></textarea>
+      <button onclick="sendTurn()">发送</button>
+    </div>
+    <div id="tabs">
+      <button onclick="loadHistory()">历史</button>
+      <button onclick="loadMemory()">世界记忆</button>
+      <button onclick="loadEvents()">服务器事件</button>
+    </div>
+    <div id="meta" class="muted">数据面板</div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let current = null;
+let serverId = () => $('server').value || 'numen-ab';
+let auth = () => $('token').value ? { 'Authorization': 'Bearer ' + $('token').value } : {};
+
+async function api(path, options) {
+  const resp = await fetch(path, { headers: { ...auth(), ...(options?.body ? {'Content-Type':'application/json'} : {}) }, ...options });
+  if (!resp.ok) throw new Error((await resp.text()).slice(0, 300));
+  return resp.json();
+}
+
+async function loadCompanions() {
+  const data = await api(`/v1/companions?server=${encodeURIComponent(serverId())}`);
+  const list = $('companion-list');
+  list.innerHTML = '';
+  const lines = String(data.companions).split('\n').filter(Boolean);
+  lines.forEach(line => {
+    const div = document.createElement('div');
+    div.textContent = line;
+    div.onclick = () => { current = line.split(/\s+/)[0]; [...list.children].forEach(c => c.classList.remove('active')); div.classList.add('active'); $('chat').textContent = '已选择：' + line; };
+    list.appendChild(div);
+  });
+}
+
+async function sendTurn() {
+  const message = $('message').value.trim();
+  if (!current || !message) return;
+  $('chat').textContent = '… ' + message;
+  $('message').value = '';
+  try {
+    const data = await api('/v1/turns', { method: 'POST', body: JSON.stringify({ server: serverId(), companion: current, message }) });
+    $('chat').textContent = data.final + '\n\n' + JSON.stringify(data.actions, null, 2);
+    loadHistory();
+  } catch (e) { $('chat').textContent = '错误：' + e.message; }
+}
+
+async function loadHistory() {
+  if (!current) return;
+  try {
+    const data = await api(`/v1/history?server=${encodeURIComponent(serverId())}&companion=${encodeURIComponent(current)}`);
+    $('meta').textContent = JSON.stringify(data.messages, null, 2);
+  } catch (e) { $('meta').textContent = '错误：' + e.message; }
+}
+
+async function loadMemory() {
+  if (!current) return;
+  try {
+    const data = await api(`/v1/memory?server=${encodeURIComponent(serverId())}&companion=${encodeURIComponent(current)}`);
+    $('meta').textContent = JSON.stringify(data.blocks, null, 2);
+  } catch (e) { $('meta').textContent = '错误：' + e.message; }
+}
+
+async function loadEvents() {
+  if (!current) return;
+  try {
+    const data = await api(`/v1/events?server=${encodeURIComponent(serverId())}&companion=${encodeURIComponent(current)}`);
+    $('meta').textContent = JSON.stringify(data.events, null, 2);
+  } catch (e) { $('meta').textContent = '错误：' + e.message; }
+}
+</script>
+</body>
+</html>

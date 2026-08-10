@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""常驻大脑服务：HTTP API + Web UI，管理多服务器上的 Numen 同伴。"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any, Callable
+
+from action_brain import ActionBrainRuntime, TurnCheckpoint, resolve_companion_id
+from brain_runner import McpClient, model_tools
+from event_inbox import EventInbox
+from persistent_brain import BrainSessionStore
+from persistent_action_cli import (
+    COMPACT_MAX_CHARS,
+    COMPACT_MAX_MESSAGES,
+    ROOT,
+    attach_events,
+    build_paths,
+    compact_history,
+    create_compactor,
+    create_model_adapter,
+    live_transport,
+    load_persona,
+    make_load_skill,
+    make_world_memory_tools,
+)
+from world_memory import WorldMemoryStore
+
+
+class CompanionContext:
+    """一个同伴的运行上下文：MCP 连接、会话、记忆、收件箱与运行时。"""
+
+    def __init__(self, *, server_id: str, companion: str,
+                 mcp: McpClient, persona: str | None = None) -> None:
+        self.server_id = server_id
+        self.companion = companion
+        self.persona = persona
+        self.mcp = mcp
+        listing = mcp.call("list_companions", {})
+        self.companion_id = resolve_companion_id(listing, companion)
+        self.listing_text = listing if isinstance(listing, str) else json.dumps(listing)
+
+        paths = build_paths(ROOT, server_id, self.companion_id)
+        self.store = BrainSessionStore(ROOT / "sessions", server_id, self.companion_id)
+        self.memory = WorldMemoryStore(
+            ROOT / "memory" / server_id / f"{self.companion_id}.json")
+        self.inbox = EventInbox(ROOT / "inbox" / server_id / f"{self.companion_id}.jsonl")
+
+        live_tools = mcp.tools()
+        tools, requires_control = model_tools(live_tools)
+        local_tools = make_world_memory_tools(self.memory)
+        local_tools["load_skill"] = make_load_skill(ROOT / "skills")
+        local_schemas = [
+            {"name": "load_skill", "description": "加载 skills/<name>.md 技能内容",
+             "parameters": {"type": "object", "properties": {
+                 "name": {"type": "string", "description": "技能名（不带 .md）"}},
+                 "required": ["name"]}},
+            {"name": "remember_block", "description": "记录一个重要方块的位置",
+             "parameters": {"type": "object", "properties": {
+                 "type": {"type": "string"}, "x": {"type": "integer"},
+                 "y": {"type": "integer"}, "z": {"type": "integer"},
+                 "note": {"type": "string"}},
+                 "required": ["type", "x", "y", "z"]}},
+            {"name": "recall_blocks", "description": "回忆记过的重要方块(按距离排序)",
+             "parameters": {"type": "object", "properties": {
+                 "x": {"type": "number"}, "z": {"type": "number"},
+                 "type": {"type": "string"}, "limit": {"type": "integer"}}}},
+        ]
+        self.persona_text = load_persona(ROOT, persona) if persona else None
+        self.runtime = ActionBrainRuntime(
+            store=self.store,
+            checkpoint=TurnCheckpoint(paths["checkpoint"]),
+            mcp=mcp,
+            companion=companion,
+            model=create_model_adapter(live_transport, persona=self.persona_text),
+            tools=[*tools, *local_schemas],
+            requires_control=requires_control,
+            local_tools=local_tools,
+            max_rounds=10,
+        )
+        self.lock = threading.Lock()
+
+    def list_companions(self) -> str:
+        return self.listing_text
+
+    def run_turn(self, message: str) -> dict[str, Any]:
+        with self.lock:
+            if self.store.should_compact(max_messages=COMPACT_MAX_MESSAGES,
+                                         max_chars=COMPACT_MAX_CHARS):
+                compact_history(self.store, create_compactor(live_transport))
+            before = len(self.store.messages())
+            result = self.runtime.run_turn(attach_events(message, self.inbox.read()))
+            self.inbox.clear()
+            return {"final": result["final"], "actions": result["actions"],
+                    "history_before": before, "history_after": len(self.store.messages())}
+
+    def recover_turn(self) -> dict[str, Any]:
+        with self.lock:
+            before = len(self.store.messages())
+            result = self.runtime.recover_turn()
+            return {"final": result["final"], "actions": result.get("actions", []),
+                    "history_before": before, "history_after": len(self.store.messages())}
+
+    def history(self) -> list[dict[str, str]]:
+        return self.store.messages()
+
+    def memory_blocks(self) -> list[dict[str, Any]]:
+        return self.memory.recall(limit=100)
+
+    def events(self) -> list[dict[str, Any]]:
+        return self.inbox.read()
+
+
+def make_handler(context_factory: Callable[[str, str | None, str | None], CompanionContext],
+                 token: str, static_dir: Path) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        def _auth(self) -> bool:
+            header = self.headers.get("Authorization", "")
+            return header == "Bearer " + token
+
+        def _json(self, status: int, payload: Any) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _read_body(self) -> dict[str, Any]:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0:
+                return {}
+            return json.loads(self.rfile.read(length).decode("utf-8"))
+
+        def do_GET(self) -> None:
+            if not self._auth():
+                self._json(401, {"error": "unauthorized"})
+                return
+            if self.path == "/health":
+                self._json(200, {"ok": True})
+                return
+            parsed = self._parse_path()
+            if parsed is None:
+                self._json(404, {"error": "not found"})
+                return
+            route, params, context = parsed
+            if route == "companions":
+                ctx = context_factory(params.get("server", "numen-ab"), None, None)
+                self._json(200, {"companions": ctx.list_companions()})
+            elif route in ("history", "memory", "events"):
+                ctx = self._ctx_or_error(params)
+                if ctx is None:
+                    return
+                if route == "history":
+                    self._json(200, {"messages": ctx.history()})
+                elif route == "memory":
+                    self._json(200, {"blocks": ctx.memory_blocks()})
+                else:
+                    self._json(200, {"events": ctx.events()})
+            elif route == "root":
+                self._serve_static()
+            else:
+                self._json(404, {"error": "not found"})
+
+        def do_POST(self) -> None:
+            if not self._auth():
+                self._json(401, {"error": "unauthorized"})
+                return
+            parsed = self._parse_path()
+            if parsed is None:
+                self._json(404, {"error": "not found"})
+                return
+            route, params, _ = parsed
+            body = self._read_body()
+            if route == "turns":
+                ctx = context_factory(
+                    body.get("server", "numen-ab"), body.get("companion"),
+                    body.get("persona"))
+                if ctx:
+                    self._json(200, ctx.run_turn(str(body.get("message", ""))))
+            elif route == "recover":
+                ctx = context_factory(
+                    body.get("server", "numen-ab"), body.get("companion"), None)
+                if ctx:
+                    self._json(200, ctx.recover_turn())
+            else:
+                self._json(404, {"error": "not found"})
+
+        def _ctx_or_error(self, params: dict[str, str]) -> CompanionContext | None:
+            try:
+                return context_factory(
+                    params.get("server", "numen-ab"),
+                    params.get("companion"),
+                    params.get("persona"),
+                )
+            except (ValueError, RuntimeError) as exc:
+                self._json(400, {"error": str(exc)})
+                return None
+
+        def _parse_path(self) -> tuple[str, dict[str, str], CompanionContext] | None:
+            if self.path == "/":
+                return ("root", {}, None)
+            match = re.fullmatch(r"/v1/([a-z]+)(?:\?([^#]*))?", self.path)
+            if not match:
+                return None
+            route = match.group(1)
+            params = dict(re.findall(r"([^&=]+)=([^&]*)", match.group(2) or ""))
+            return (route, params, None)
+
+        def _serve_static(self) -> None:
+            index = static_dir / "index.html"
+            if not index.exists():
+                self._json(404, {"error": "webui missing"})
+                return
+            body = index.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, fmt: str, *args: Any) -> None:  # 静默访问日志
+            pass
+
+    return Handler
+
+
+class BrainServer:
+    """带认证的常驻 HTTP 服务；port=0 时使用随机端口（测试用）。"""
+
+    def __init__(self, *, host: str, port: int, token: str,
+                 factory: Callable[[str, str | None, str | None], CompanionContext],
+                 static_dir: Path) -> None:
+        handler = make_handler(factory, token, static_dir)
+        self._httpd = ThreadingHTTPServer((host, port), handler)
+
+    def start(self) -> None:
+        thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        thread.start()
+
+    def stop(self) -> None:
+        self._httpd.shutdown()
+        self._httpd.server_close()
+
+    def bound_port(self) -> int:
+        return self._httpd.server_address[1]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=18777)
+    parser.add_argument("--token", default="", help="Bearer token；为空时仅限本机且无认证")
+    parser.add_argument("--static-dir", default=str(ROOT / "webui"))
+    args = parser.parse_args()
+
+    def factory(server_id: str, companion: str | None,
+                persona: str | None) -> CompanionContext:
+        mcp = McpClient()
+        mcp.initialize()
+        if companion is None:
+            return _ListingContext(server_id, mcp.call("list_companions", {}))
+        return CompanionContext(server_id=server_id, companion=companion,
+                                mcp=mcp, persona=persona)
+
+    server = BrainServer(host=args.host, port=args.port, token=args.token,
+                         factory=factory, static_dir=Path(args.static_dir))
+    server.start()
+    print(json.dumps({
+        "status": "up",
+        "url": f"http://{args.host}:{server.bound_port()}",
+        "auth": bool(args.token),
+    }, ensure_ascii=False, indent=2))
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        server.stop()
+
+
+class _ListingContext:
+    """仅用于 /v1/companions 的轻量上下文：返回同伴列表文本。"""
+
+    def __init__(self, server_id: str, listing: Any) -> None:
+        self._listing = listing if isinstance(listing, str) else json.dumps(listing)
+
+    def list_companions(self) -> str:
+        return self._listing
+
+
+if __name__ == "__main__":
+    main()

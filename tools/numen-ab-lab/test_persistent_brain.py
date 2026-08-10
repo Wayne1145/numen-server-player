@@ -15,6 +15,93 @@ class BrainSessionStoreTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "path separator"):
                 BrainSessionStore(Path(tmp), "ab-server", "uuid\\1")
 
+    def test_summary_replaces_older_history_in_model_view(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = BrainSessionStore(Path(tmp), "ab-server", "companion")
+            store.append("user", "第一轮问题")
+            store.append("assistant", "第一轮回答")
+            store.append_summary("识别词：星潮-824；已走到 x=10 附近。", transaction_id="sum-1")
+            store.append("user", "现在坐标？")
+            store.append("assistant", "x=10")
+
+            visible = store.messages()
+            self.assertEqual("system", visible[0]["role"])
+            self.assertIn("星潮-824", visible[0]["content"])
+            self.assertEqual(
+                [
+                    {"role": "user", "content": "现在坐标？"},
+                    {"role": "assistant", "content": "x=10"},
+                ],
+                visible[1:],
+            )
+            self.assertEqual("识别词：星潮-824；已走到 x=10 附近。", store.summary())
+
+    def test_only_latest_summary_survives_in_model_view(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = BrainSessionStore(Path(tmp), "ab-server", "companion")
+            store.append_summary("旧摘要", transaction_id="sum-old")
+            store.append("user", "中间消息")
+            store.append_summary("新摘要：记住口令 A-1", transaction_id="sum-new")
+            store.append("user", "口令是？")
+
+            visible = store.messages()
+            self.assertEqual(2, len(visible))
+            self.assertIn("A-1", visible[0]["content"])
+            self.assertEqual({"role": "user", "content": "口令是？"}, visible[1])
+
+    def test_should_compact_by_message_count_and_chars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = BrainSessionStore(Path(tmp), "ab-server", "companion")
+            self.assertFalse(store.should_compact(max_messages=10, max_chars=10000))
+            for index in range(12):
+                store.append("user" if index % 2 == 0 else "assistant",
+                             f"这是一条比较长的消息内容，编号 {index}")
+            self.assertTrue(store.should_compact(max_messages=10, max_chars=10000))
+            self.assertTrue(store.should_compact(max_messages=1000, max_chars=50))
+
+    def test_compaction_failure_keeps_history_intact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = BrainSessionStore(Path(tmp), "ab-server", "companion")
+            store.append("user", "不可丢失的消息")
+            store.append("assistant", "回答")
+
+            from persistent_brain import compact_history
+
+            def fail_model(_messages):
+                raise RuntimeError("model unavailable")
+
+            compact_history(store, fail_model)
+
+            self.assertEqual(None, store.summary())
+            self.assertEqual(
+                [
+                    {"role": "user", "content": "不可丢失的消息"},
+                    {"role": "assistant", "content": "回答"},
+                ],
+                store.messages(),
+            )
+
+    def test_compaction_writes_summary_and_trims_view(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = BrainSessionStore(Path(tmp), "ab-server", "companion")
+            for index in range(12):
+                store.append("user" if index % 2 == 0 else "assistant", f"消息 {index}")
+            store.append("user", "识别词：星潮-824")
+            store.append("assistant", "记住了")
+
+            from persistent_brain import compact_history
+
+            compact_history(
+                store,
+                lambda messages: "摘要：历史共 14 条，识别词 星潮-824，最后到达 x=10。",
+            )
+
+            self.assertIn("星潮-824", store.summary())
+            visible = store.messages()
+            self.assertEqual(1, len(visible))
+            self.assertEqual("system", visible[0]["role"])
+            self.assertIn("星潮-824", visible[0]["content"])
+
     def test_batch_is_one_jsonl_transaction_and_reloads_as_messages(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = BrainSessionStore(Path(tmp), "ab-server", "companion")

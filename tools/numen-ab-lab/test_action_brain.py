@@ -143,6 +143,118 @@ class ExactTaskExecutionTest(unittest.TestCase):
 
 
 class PersistentActionTurnTest(unittest.TestCase):
+    def test_local_tool_runs_without_mcp_or_lease(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = BrainSessionStore(root / "sessions", "ab", "uuid-1")
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            mcp = FakeMcp()
+            answers = iter([
+                '{"type":"tool","name":"load_skill","arguments":{"name":"mining"}}',
+                '{"type":"final","content":"技能已加载。"}',
+            ])
+
+            runtime = ActionBrainRuntime(
+                store=store, checkpoint=checkpoint, mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "load_skill", "parameters": {}}],
+                requires_control={},
+                local_tools={"load_skill": lambda args: {"success": True, "skill": args["name"]}},
+            )
+            result = runtime.run_turn("学习挖矿技能")
+
+            self.assertEqual("技能已加载。", result["final"])
+            self.assertEqual([], mcp.calls, "本地工具不应触碰 MCP/租约")
+            persisted = store.messages()
+            self.assertIn("load_skill", persisted[1]["content"])
+            self.assertIn('"skill": "mining"', persisted[2]["content"])
+            self.assertFalse(checkpoint.path.exists())
+
+    def test_mcp_tool_and_local_tool_mix_in_one_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = BrainSessionStore(root / "sessions", "ab", "uuid-1")
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            mcp = FakeMcp([{"state": "done", "task_id": "t9", "result": {"success": True}}])
+            answers = iter([
+                '{"type":"tool","name":"goto","arguments":{"x":6.5,"y":null,"z":0.5}}',
+                '{"type":"tool","name":"load_skill","arguments":{"name":"mining"}}',
+                '{"type":"final","content":"完成。"}',
+            ])
+
+            runtime = ActionBrainRuntime(
+                store=store, checkpoint=checkpoint, mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "goto", "parameters": {}}, {"name": "load_skill", "parameters": {}}],
+                requires_control={"goto": True},
+                local_tools={"load_skill": lambda args: {"success": True, "skill": args["name"]}},
+                sleep=lambda _: None,
+            )
+            result = runtime.run_turn("先走再学")
+
+            self.assertEqual("完成。", result["final"])
+            self.assertEqual(2, len(result["actions"]))
+            self.assertEqual("goto", result["actions"][0]["tool"])
+            self.assertEqual("load_skill", result["actions"][1]["tool"])
+
+    def test_write_action_injects_client_action_id(self):
+        mcp = FakeMcp([{"state": "done", "task_id": "t9", "result": {"success": True}}])
+        execute_tool_exact(
+            mcp, companion="ABBrain", name="goto",
+            arguments={"x": 6.5, "y": None, "z": 0.5},
+            requires_control=True, sleep=lambda _: None,
+        )
+        goto_call = [args for name, args in mcp.calls if name == "goto"][0]
+        client_id = goto_call.get("client_action_id")
+        self.assertTrue(isinstance(client_id, str) and len(client_id) > 8)
+
+    def test_recover_planned_action_redispatch_same_client_action_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = BrainSessionStore(root / "sessions", "ab", "uuid-1")
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            checkpoint.write({
+                "state": "tool_planned",
+                "turn_id": "turn-replay",
+                "user": "向东走六格",
+                "tool": "goto",
+                "arguments": {"x": 6.5, "y": None, "z": 0.5},
+                "client_action_id": "act-replay-1",
+                "transcript": [
+                    {"role": "user", "content": "向东走六格"},
+                    {"role": "assistant", "content": '{"type":"tool","name":"goto","arguments":{}}'},
+                ],
+            })
+            mcp = FakeMcp([{"state": "done", "task_id": "t9", "result": {"success": True}}])
+            runtime = ActionBrainRuntime(
+                store=store, checkpoint=checkpoint, mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: '{"type":"final","content":"恢复重发完成。"}',
+                tools=[{"name": "goto", "parameters": {}}],
+                requires_control={"goto": True},
+                local_tools={},
+                sleep=lambda _: None,
+            )
+            result = runtime.recover_turn()
+
+            self.assertEqual("恢复重发完成。", result["final"])
+            goto_call = [args for name, args in mcp.calls if name == "goto"]
+            self.assertEqual(1, len(goto_call))
+            self.assertEqual("act-replay-1", goto_call[0]["client_action_id"])
+            self.assertFalse(checkpoint.path.exists())
+
+    def test_recover_planned_action_without_client_id_still_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            checkpoint.write({"state": "tool_planned", "turn_id": "turn-x", "tool": "goto"})
+            runtime = ActionBrainRuntime(
+                store=BrainSessionStore(root / "sessions", "ab", "uuid-1"),
+                checkpoint=checkpoint, mcp=FakeMcp(), companion="ABBrain",
+                model=lambda _messages, _tools: "", tools=[], requires_control={},
+            )
+            with self.assertRaisesRegex(RecoveryRequired, "ambiguous"):
+                runtime.recover_turn()
+
     def test_checkpoint_write_fsyncs_parent_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

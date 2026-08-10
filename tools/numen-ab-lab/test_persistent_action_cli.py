@@ -2,10 +2,80 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from persistent_action_cli import build_paths, create_model_adapter
+from persistent_action_cli import (
+    attach_events,
+    build_paths,
+    create_model_adapter,
+    load_persona,
+    make_load_skill,
+    make_world_memory_tools,
+)
 
 
 class PersistentActionCliTest(unittest.TestCase):
+    def test_persona_is_loaded_from_personas_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            persona_dir = root / "personas"
+            persona_dir.mkdir()
+            (persona_dir / "yachiyo.md").write_text(
+                "你是月见八千代：安静、温柔、疏离的守望者。", encoding="utf-8"
+            )
+            text = load_persona(root, "yachiyo")
+            self.assertIn("月见八千代", text)
+            self.assertIsNone(load_persona(root, "missing"))
+
+    def test_model_adapter_injects_persona_before_system_prompt(self):
+        observed = {}
+
+        def transport(payload):
+            observed.update(payload)
+            return {
+                "choices": [{"message": {"content": '{"type":"final","content":"好"}'}}]
+            }
+
+        adapter = create_model_adapter(transport, persona="你是安静的歌姬。")
+        adapter([{"role": "user", "content": "你好"}], [])
+        self.assertIn("你是安静的歌姬。", observed["messages"][0]["content"])
+
+    def test_load_skill_returns_content_or_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skills = Path(tmp) / "skills"
+            skills.mkdir()
+            (skills / "mining.md").write_text("# 挖矿\n先确认工具。", encoding="utf-8")
+            load_skill = make_load_skill(skills)
+
+            ok = load_skill({"name": "mining"})
+            self.assertTrue(ok["success"])
+            self.assertIn("挖矿", ok["content"])
+            missing = load_skill({"name": "nope"})
+            self.assertFalse(missing["success"])
+
+    def test_world_memory_tools_remember_and_recall(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            from world_memory import WorldMemoryStore
+
+            tools = make_world_memory_tools(WorldMemoryStore(Path(tmp) / "memory.json"))
+            result = tools["remember_block"]({
+                "type": "minecraft:crafting_table", "x": 5, "y": 64, "z": 0,
+                "note": "家的工作台",
+            })
+            self.assertTrue(result["success"])
+            recalled = tools["recall_blocks"]({"x": 0, "z": 0, "type": "minecraft:crafting_table"})
+            self.assertEqual(1, len(recalled["blocks"]))
+            self.assertEqual(5, recalled["blocks"][0]["x"])
+
+    def test_attach_events_prefixes_user_message(self):
+        events = [
+            {"kind": "death", "detail": "fell from high place"},
+            {"kind": "chat", "detail": "Wayne: 早上好"},
+        ]
+        merged = attach_events("去砍树", events)
+        self.assertIn("fell from high place", merged)
+        self.assertIn("早上好", merged)
+        self.assertIn("去砍树", merged)
+        self.assertEqual("去砍树", attach_events("去砍树", []))
+
     def test_paths_are_keyed_by_server_and_uuid_not_display_name(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

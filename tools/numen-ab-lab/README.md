@@ -13,12 +13,17 @@ OpenAI-compatible 模型路由。仓库内保留的是**干净公开版**：凭�
   单记录事务 + `turn_id` 幂等。
 - `persistent_action_cli.py` — 命令行入口：`--message` 提交请求，`--recover` 恢复未完成回合。
 - `persistent_chat.py` — 纯记忆对话的最小入口（无工具）。
+- `world_memory.py` — 世界记忆：`remember_block`/`recall_blocks` 按同伴隔离。
+- `event_inbox.py` — 服务器事件收件箱（回合开始附加，成功提交后消费）。
+- `brain_server.py` — 常驻 HTTP API + Web UI（多服路径、Bearer 认证）。
+- `webui/` — 同伴控制台前端（对话/历史/记忆/事件）。
+- `personas/` `skills/` — 角色卡与技能库（`--persona`、`load_skill`）。
 - `terminal_result_acceptance.py` — MCP 任务终态（done/failed/stopped）隔离验收脚本。
-- `test_*.py` — 全部单元测试（当前 35/35 通过）。
+- `test_*.py` — 全部单元测试（当前 72/72 通过）。
 - `cases.json` — A/B 任务定义。
 - `server_control.example.json` — 服务端 `config/numen/server_control.json` 模板，
   **token 必须替换为随机长字符串**。
-- `*ACCEPTANCE.md` / `AB-MOVE-REPORT.md` — 各阶段隔离验收报告。
+- `*ACCEPTANCE.md` / `AUDIT-*.md` / `AB-MOVE-REPORT.md` — 各阶段验收与审计报告。
 
 ## 环境变量（全部必填，无默认凭据）
 
