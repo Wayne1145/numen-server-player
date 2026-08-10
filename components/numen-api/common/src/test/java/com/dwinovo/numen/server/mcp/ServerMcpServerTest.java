@@ -44,6 +44,7 @@ class ServerMcpServerTest {
     static class MockActuator implements ServerNumenActuator {
         final UUID bot = UUID.randomUUID();
         volatile String lastRequestedTaskId;
+        volatile int invokeCount;
 
         @Override public CompletableFuture<List<CompanionRef>> listCompanions(McpPrincipal p) {
             return CompletableFuture.completedFuture(List.of(new CompanionRef(bot, "Bot", ServerOwner.ID, true)));
@@ -61,6 +62,7 @@ class ServerMcpServerTest {
             return CompletableFuture.completedFuture(null);
         }
         @Override public CompletableFuture<ToolResult> invoke(McpPrincipal p, UUID id, String leaseId, String tool, JsonObject args) {
+            invokeCount++;
             if ("goto".equals(tool)) {
                 return CompletableFuture.completedFuture(ToolResult.of(
                         "{\"success\":true,\"data\":{\"task_id\":\"t1\",\"task\":\"goto\",\"async\":true}}"));
@@ -223,6 +225,40 @@ class ServerMcpServerTest {
             assertTrue(text.contains("no such companion"), text);
         } finally {
             ambiguousServer.stop();
+        }
+    }
+
+    @Test
+    void sameClientActionIdDispatchesOnlyOnce() throws Exception {
+        ServerMcpServer idempotentServer = new ServerMcpServer(
+                new McpNetConfig(true, "127.0.0.1", 0, 64 * 1024, 16, 32, 4, 10, 1000),
+                mockActuator,
+                new AuthTokens(Map.of(TOKEN, McpPrincipal.admin("mcp-admin"))),
+                SecurityPolicy.defaults());
+        idempotentServer.start();
+        try {
+            String u = "http://127.0.0.1:" + idempotentServer.boundPort() + "/mcp";
+            String call = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":"
+                    + "{\"name\":\"goto\",\"arguments\":{\"companion\":\"Bot\",\"lease_id\":\"L\","
+                    + "\"x\":1,\"z\":2,\"client_action_id\":\"act-1\"}}}";
+            HttpRequest req = HttpRequest.newBuilder(URI.create(u))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + TOKEN)
+                    .POST(HttpRequest.BodyPublishers.ofString(call))
+                    .build();
+
+            String first = http.send(req, HttpResponse.BodyHandlers.ofString()).body();
+            String second = http.send(req, HttpResponse.BodyHandlers.ofString()).body();
+
+            JsonObject firstResult = JsonParser.parseString(first).getAsJsonObject().getAsJsonObject("result");
+            JsonObject secondResult = JsonParser.parseString(second).getAsJsonObject().getAsJsonObject("result");
+            assertEquals(1, mockActuator.invokeCount, "同一 client_action_id 只能派发一次");
+            assertTrue(firstResult.getAsJsonArray("content").get(0).getAsJsonObject()
+                    .get("text").getAsString().contains("t1"));
+            assertTrue(secondResult.getAsJsonArray("content").get(0).getAsJsonObject()
+                    .get("text").getAsString().contains("t1"));
+        } finally {
+            idempotentServer.stop();
         }
     }
 

@@ -33,6 +33,7 @@ public final class ToolCatalog {
             e("locate_biome", ToolCapability.SERVER_READ_ONLY),
             e("locate_structure", ToolCapability.SERVER_READ_ONLY),
             e("task_status", ToolCapability.SERVER_READ_ONLY),
+            e("get_recent_events", ToolCapability.SERVER_READ_ONLY),
             // -- non-destructive body actions --
             e("goto", ToolCapability.SERVER_BODY_ACTION),
             e("collect_items", ToolCapability.SERVER_BODY_ACTION),

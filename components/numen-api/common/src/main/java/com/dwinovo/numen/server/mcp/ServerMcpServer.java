@@ -7,6 +7,7 @@ import com.dwinovo.numen.agent.tool.NumenTool;
 import com.dwinovo.numen.agent.tool.ToolRegistry;
 import com.dwinovo.numen.server.AuthTokens;
 import com.dwinovo.numen.server.CompanionRef;
+import com.dwinovo.numen.server.IdempotentDispatchRegistry;
 import com.dwinovo.numen.server.Lease;
 import com.dwinovo.numen.server.McpPrincipal;
 import com.dwinovo.numen.server.RateLimiter;
@@ -293,6 +294,7 @@ public final class ServerMcpServer {
                 UUID id = resolveCompanion(principal, args);
                 if (id == null) yield content("no such companion", true);
                 boolean ok = await(actuator.deleteCompanion(principal, id));
+                IdempotentDispatchRegistry.clear(id);
                 yield content(ok ? "deleted " + id : "could not delete " + id, !ok);
             }
             case "acquire_control" -> {
@@ -345,8 +347,41 @@ public final class ServerMcpServer {
         JsonObject toolArgs = args.deepCopy();
         toolArgs.remove("companion");
         toolArgs.remove("lease_id");
+        // 幂等派发：client_action_id 由外部大脑生成；命中注册表直接返回原 task_id，
+        // 不重复派发 —— 关闭“动作已受理但回执丢失”的 dispatch_unknown 窗口。
+        String clientActionId = asString(toolArgs.get("client_action_id"));
+        if (clientActionId != null) {
+            toolArgs.remove("client_action_id");
+            String existing = IdempotentDispatchRegistry.lookup(id, clientActionId);
+            if (existing != null) {
+                JsonObject o = new JsonObject();
+                o.addProperty("success", true);
+                JsonObject data = new JsonObject();
+                data.addProperty("task_id", existing);
+                data.addProperty("task", tool);
+                data.addProperty("async", true);
+                data.addProperty("idempotent", true);
+                o.add("data", data);
+                return content(o.toString(), false);
+            }
+        }
         ToolResult r = await(actuator.invoke(principal, id, lease, tool, toolArgs));
+        if (clientActionId != null) {
+            String taskId = extractTaskId(r.json());
+            if (taskId != null) {
+                IdempotentDispatchRegistry.record(id, clientActionId, taskId);
+            }
+        }
         return content(r.json(), !r.ok());
+    }
+
+    private static String extractTaskId(String json) {
+        try {
+            return JsonParser.parseString(json).getAsJsonObject()
+                    .getAsJsonObject("data").get("task_id").getAsString();
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private String listCompanionsText(McpPrincipal principal) {

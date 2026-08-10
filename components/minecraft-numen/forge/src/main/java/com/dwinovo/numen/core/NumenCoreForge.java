@@ -32,6 +32,18 @@ public class NumenCoreForge {
         NumenCore.init();
 
         MinecraftForge.EVENT_BUS.addListener(NumenCoreForge::onServerTickPost);
+        // 服务器事件(玩家聊天/死亡)进入环形缓冲，供 MCP get_recent_events 读取。
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.ServerChatEvent e) ->
+                com.dwinovo.numen.core.tools.RecentEventsTool.BUFFER.add(
+                        "chat", e.getPlayer() == null ? "" : e.getPlayer().getName().getString(),
+                        e.getRawText()));
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.entity.living.LivingDeathEvent e) -> {
+            if (e.getEntity() instanceof net.minecraft.world.entity.player.Player player) {
+                com.dwinovo.numen.core.tools.RecentEventsTool.BUFFER.add(
+                        "death", player.getName().getString(),
+                        player.getName().getString() + " died");
+            }
+        });
         // Release pathfinding chunk-ref snapshots when the server stops (don't pin an old world).
         MinecraftForge.EVENT_BUS.addListener((ServerStoppedEvent e) -> PathCaches.dropAll());
         // Debug verbs merged into the /numen root registered by the engine mod.

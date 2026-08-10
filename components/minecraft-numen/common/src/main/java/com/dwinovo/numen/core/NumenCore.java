@@ -139,6 +139,7 @@ public final class NumenCore {
         ToolRegistry.register(new com.dwinovo.numen.core.tools.TodoWriteTool());   // raw NumenTool
         ToolRegistry.register(new com.dwinovo.numen.core.tools.LoadSkillTool());   // raw NumenTool
         ToolRegistry.register(new com.dwinovo.numen.core.tools.ChatTool());        // raw NumenTool: send_chat
+        ToolRegistry.register(new com.dwinovo.numen.core.tools.RecentEventsTool()); // raw NumenTool: get_recent_events
     }
 
 
