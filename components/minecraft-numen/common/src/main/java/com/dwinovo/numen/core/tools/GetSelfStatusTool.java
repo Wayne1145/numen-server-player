@@ -113,6 +113,13 @@ public final class GetSelfStatusTool implements NumenTool {
         root.add("target", JsonNull.INSTANCE);
         root.addProperty("on_ground", self.onGround());
         root.addProperty("in_water", self.isInWater());
+        // 头顶方块：玩家实体占 2 格，feet.y+2 即头顶那格。
+        // 用于让模型知道"头上有无天花板/树冠"，避免撞头式寻路。
+        var headState = self.level().getBlockState(
+                new net.minecraft.core.BlockPos(self.blockPosition().getX(),
+                        self.blockPosition().getY() + 2, self.blockPosition().getZ()));
+        root.addProperty("block_above",
+                net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(headState.getBlock()).toString());
         // Remaining breath — the one stat whose absence let a body drown while its
         // mind calmly planned an 870-block trip (frozen-ocean death, 2026-07-15).
         root.addProperty("air", self.getAirSupply() + "/" + self.getMaxAirSupply() + " ticks");

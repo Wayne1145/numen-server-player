@@ -43,6 +43,7 @@ public final class ToolCatalog {
             e("close_gui", ToolCapability.SERVER_BODY_ACTION),
             e("interact_at", ToolCapability.SERVER_BODY_ACTION),
             e("interact_entity", ToolCapability.SERVER_BODY_ACTION),
+            e("send_chat", ToolCapability.SERVER_BODY_ACTION),
             e("task_stop", ToolCapability.SERVER_BODY_ACTION),
             // -- destructive (off by default; enable in policy) --
             e("mine", ToolCapability.DESTRUCTIVE),
