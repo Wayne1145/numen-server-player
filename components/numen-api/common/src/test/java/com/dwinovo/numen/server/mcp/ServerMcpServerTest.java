@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ServerMcpServerTest {
 
     /** A canned actuator: one companion "Bot", trivial leases, a goto that returns a task_id. */
-    static final class MockActuator implements ServerNumenActuator {
+    static class MockActuator implements ServerNumenActuator {
         final UUID bot = UUID.randomUUID();
         volatile String lastRequestedTaskId;
 
@@ -190,6 +190,40 @@ class ServerMcpServerTest {
         assertEquals(401, post(body, null).statusCode(), "no token");
         assertEquals(401, post(body, "wrong").statusCode(), "bad token");
         assertEquals(200, post(body, TOKEN).statusCode(), "good token");
+    }
+
+    @Test
+    void rejectsAmbiguousCompanionName() throws Exception {
+        ServerMcpServer ambiguousServer = new ServerMcpServer(
+                new McpNetConfig(true, "127.0.0.1", 0, 64 * 1024, 16, 32, 4, 10, 1000),
+                new MockActuator() {
+                    @Override public CompletableFuture<List<CompanionRef>> listCompanions(McpPrincipal p) {
+                        return CompletableFuture.completedFuture(List.of(
+                                new CompanionRef(UUID.randomUUID(), "Bot", ServerOwner.ID, true),
+                                new CompanionRef(UUID.randomUUID(), "Bot", ServerOwner.ID, true)));
+                    }
+                },
+                new AuthTokens(Map.of(TOKEN, McpPrincipal.admin("mcp-admin"))),
+                SecurityPolicy.defaults());
+        ambiguousServer.start();
+        try {
+            String u = "http://127.0.0.1:" + ambiguousServer.boundPort() + "/mcp";
+            HttpRequest req = HttpRequest.newBuilder(URI.create(u))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + TOKEN)
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":"
+                                    + "{\"name\":\"acquire_control\",\"arguments\":{\"companion\":\"Bot\"}}}"))
+                    .build();
+            JsonObject r = JsonParser.parseString(
+                    http.send(req, HttpResponse.BodyHandlers.ofString()).body()).getAsJsonObject();
+            assertTrue(r.getAsJsonObject("result").get("isError").getAsBoolean());
+            String text = r.getAsJsonObject("result").getAsJsonArray("content").get(0)
+                    .getAsJsonObject().get("text").getAsString();
+            assertTrue(text.contains("no such companion"), text);
+        } finally {
+            ambiguousServer.stop();
+        }
     }
 
     @Test

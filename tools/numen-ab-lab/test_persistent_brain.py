@@ -8,6 +8,13 @@ from persistent_brain import BrainSessionStore, run_persistent_turn
 
 
 class BrainSessionStoreTest(unittest.TestCase):
+    def test_rejects_path_separators_in_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "path separator"):
+                BrainSessionStore(Path(tmp), "a/b", "uuid-1")
+            with self.assertRaisesRegex(ValueError, "path separator"):
+                BrainSessionStore(Path(tmp), "ab-server", "uuid\\1")
+
     def test_batch_is_one_jsonl_transaction_and_reloads_as_messages(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = BrainSessionStore(Path(tmp), "ab-server", "companion")
@@ -33,6 +40,21 @@ class BrainSessionStoreTest(unittest.TestCase):
             reopened = BrainSessionStore(Path(tmp), "ab-server", "companion")
             self.assertTrue(reopened.has_transaction("turn-1"))
             self.assertEqual(batch, reopened.messages())
+
+    def test_append_pair_is_one_transaction_record_never_half_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = BrainSessionStore(Path(tmp), "ab-server", "companion")
+            store.append_pair("问题", "回答")
+
+            self.assertEqual(1, len(store.path.read_text(encoding="utf-8").splitlines()))
+            reopened = BrainSessionStore(Path(tmp), "ab-server", "companion")
+            self.assertEqual(
+                [
+                    {"role": "user", "content": "问题"},
+                    {"role": "assistant", "content": "回答"},
+                ],
+                reopened.messages(),
+            )
 
     def test_reloads_history_for_same_server_and_companion(self):
         with tempfile.TemporaryDirectory() as tmp:

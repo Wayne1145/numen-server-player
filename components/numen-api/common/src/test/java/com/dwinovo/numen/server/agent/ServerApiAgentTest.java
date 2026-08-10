@@ -4,6 +4,7 @@ package com.dwinovo.numen.server.agent;
 
 import com.dwinovo.numen.agent.provider.AssistantTurn;
 import com.dwinovo.numen.agent.provider.LlmToolCall;
+import com.dwinovo.numen.agent.llm.ConvoState;
 import com.dwinovo.numen.entity.ServerOwner;
 import com.dwinovo.numen.server.CompanionRef;
 import com.dwinovo.numen.server.Lease;
@@ -12,6 +13,7 @@ import com.dwinovo.numen.server.ServerNumenActuator;
 import com.dwinovo.numen.server.TaskStatus;
 import com.dwinovo.numen.server.ToolResult;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayDeque;
@@ -19,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -149,5 +152,37 @@ class ServerApiAgentTest {
         assertNull(act.log.stream().filter(s -> s.startsWith("invoke")).findFirst().orElse(null),
                 "no tool may run without the lease");
         assertEquals(ServerApiAgent.State.IDLE, agent.state());
+    }
+
+    @Test
+    void errorStatusDetailIsReturnedAsValidEscapedJson() throws Exception {
+        MockActuator act = new MockActuator() {
+            @Override public CompletableFuture<TaskStatus> getTaskStatus(McpPrincipal p, UUID id, String taskId) {
+                statusPolls++;
+                return CompletableFuture.completedFuture(
+                        new TaskStatus("t9", "error", "unknown task_id: \"quote\"\\backslash"));
+            }
+        };
+        String[] captured = new String[1];
+        AtomicInteger calls = new AtomicInteger();
+        ServerApiAgent agent = new ServerApiAgent(act, McpPrincipal.admin("api-agent"),
+                UUID.randomUUID(), (msgs, sys) -> {
+            int n = calls.incrementAndGet();
+            if (n == 2) {
+                for (ConvoState.Msg m : msgs) {
+                    if (m instanceof ConvoState.Msg.Tool t) captured[0] = t.content();
+                }
+            }
+            return CompletableFuture.completedFuture(n == 1
+                    ? toolTurn(new LlmToolCall("c", "goto", "{\"x\":1,\"z\":2}"))
+                    : new AssistantTurn("done", List.of(), null));
+        }, 3, 50, 10);
+
+        String out = agent.run("go");
+
+        assertEquals("done", out);
+        JsonObject parsed = JsonParser.parseString(captured[0]).getAsJsonObject();
+        assertEquals(false, parsed.get("success").getAsBoolean());
+        assertEquals("unknown task_id: \"quote\"\\backslash", parsed.get("message").getAsString());
     }
 }

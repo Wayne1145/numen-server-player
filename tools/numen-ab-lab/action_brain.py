@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from brain_runner import parse_decision
-from persistent_brain import BrainSessionStore
+from persistent_brain import BrainSessionStore, fsync_dir
 
 TERMINAL_STATES = {"done", "failed", "timeout", "stopped"}
 
@@ -79,6 +79,7 @@ class TurnCheckpoint:
             handle.flush()
             os.fsync(handle.fileno())
         temporary.replace(self.path)
+        fsync_dir(self.path.parent)
 
     def clear(self) -> None:
         self.path.unlink(missing_ok=True)
@@ -128,12 +129,17 @@ def execute_tool_exact(mcp: Any, *, companion: str, name: str,
     try:
         dispatch = mcp.call(name, call_args)
     finally:
-        if lease_id is not None:
-            mcp.call("release_control", {"companion": companion, "lease_id": lease_id})
-
+        pass
     task_id = _task_id(dispatch)
     if on_dispatched is not None:
         on_dispatched(dispatch, task_id)
+    # 派发回执(含 task_id)已优先落盘；释放失败不能掩盖已取得的动作结果，
+    # 租约有服务端 TTL 兜底(LeaseRegistry 会清扫)。
+    if lease_id is not None:
+        try:
+            mcp.call("release_control", {"companion": companion, "lease_id": lease_id})
+        except Exception:
+            pass
     if task_id is None:
         return {"dispatch": dispatch, "task_id": None, "terminal": None, "samples": []}
 

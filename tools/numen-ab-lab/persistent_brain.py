@@ -11,15 +11,35 @@ from typing import Any
 VALID_ROLES = {"user", "assistant", "tool"}
 
 
+def fsync_dir(path: Path) -> None:
+    """尽力而为地同步目录项；文件系统不支持时忽略(如部分 Windows/网络盘)。"""
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
 def safe_segment(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_.-]", "_", value)
     return cleaned or "unknown"
+
+
+def _reject_path_separators(*values: str) -> None:
+    """身份键含路径分隔符时拒绝，避免 safe_segment 把 a/b 与 a_b 折叠成同一路径。"""
+    for value in values:
+        if "/" in value or "\\" in value:
+            raise ValueError(f"identity contains a path separator: {value!r}")
 
 
 class BrainSessionStore:
     """以 server_id + companion UUID 分区的追加式 JSONL 会话。"""
 
     def __init__(self, root: Path, server_id: str, companion_id: str) -> None:
+        _reject_path_separators(server_id, companion_id)
         self.path = (root / safe_segment(server_id)
                      / f"{safe_segment(companion_id)}.jsonl")
         self._transactions: set[str] = set()
@@ -66,21 +86,11 @@ class BrainSessionStore:
         self._messages.append(message)
 
     def append_pair(self, user_content: str, assistant_content: str) -> None:
-        """一次打开文件追加完整 user/assistant 回合，避免模型失败后留下悬空 user。"""
-        pair = [
+        """整回合作为一条 JSONL 事务落盘，断电不会留下悬空 user。"""
+        self.append_batch([
             {"role": "user", "content": user_content},
             {"role": "assistant", "content": assistant_content},
-        ]
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        encoded = "".join(
-            json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n"
-            for message in pair
-        )
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        self._messages.extend(pair)
+        ])
 
     def append_batch(self, messages: list[dict[str, str]],
                      transaction_id: str | None = None) -> None:

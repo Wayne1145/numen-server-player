@@ -16,6 +16,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from persistent_brain import fsync_dir
+
 ROOT = Path(__file__).resolve().parent
 MCP_URL = os.environ.get("NUMEN_MCP_URL", "http://127.0.0.1:25585/mcp")
 MCP_TOKEN = os.environ.get("NUMEN_MCP_TOKEN", "")
@@ -84,10 +86,16 @@ def execute_tool_with_ephemeral_lease(mcp: Any, *, companion: str, name: str,
         requires_control=requires_control,
     )
     try:
-        return mcp.call(name, call_args), lease_id
+        result = mcp.call(name, call_args)
     finally:
-        if lease_id is not None:
+        pass
+    # 释放失败不能掩盖已取得的动作结果；租约有服务端 TTL 兜底。
+    if lease_id is not None:
+        try:
             mcp.call("release_control", {"companion": companion, "lease_id": lease_id})
+        except Exception:
+            pass
+    return result, lease_id
 
 
 def score_move_trace(trace: dict[str, Any], *, max_distance: float) -> dict[str, Any]:
@@ -135,6 +143,7 @@ def save_checkpoint(path: Path, trace: dict[str, Any]) -> None:
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(json.dumps(trace, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(path)
+    fsync_dir(path.parent)
 
 
 def retry_transient(operation: Any, *, attempts: int = 2,
@@ -191,6 +200,8 @@ class McpClient:
         result = self.rpc("tools/call", {"name": name, "arguments": arguments})
         content = result.get("content", [])
         text = content[0].get("text", "") if content else ""
+        if result.get("isError") or content and content[0].get("isError"):
+            raise RuntimeError(f"MCP tool call failed: {text[:500]}")
         try:
             return json.loads(text)
         except json.JSONDecodeError:
@@ -247,10 +258,14 @@ def tool_requires_control(schema: dict[str, Any]) -> bool:
 def model_tools(live_tools: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, bool]]:
     visible: list[dict[str, Any]] = []
     control: dict[str, bool] = {}
+    seen: set[str] = set()
     for tool in live_tools:
         name = tool["name"]
         if name in MANAGEMENT_TOOLS:
             continue
+        if name in seen:
+            raise ValueError(f"duplicate tool name from server: {name}")
+        seen.add(name)
         schema = tool.get("inputSchema", {})
         control[name] = tool_requires_control(schema)
         visible.append({

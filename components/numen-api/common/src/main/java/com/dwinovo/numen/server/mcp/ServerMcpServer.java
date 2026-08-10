@@ -284,7 +284,10 @@ public final class ServerMcpServer {
             case "create_companion" -> {
                 String n = asString(args.get("name"));
                 CompanionRef ref = await(actuator.createCompanion(principal, n == null ? "" : n));
-                yield content("{\"companion\":\"" + ref.id() + "\",\"name\":\"" + ref.name() + "\"}", false);
+                JsonObject o = new JsonObject();
+                o.addProperty("companion", ref.id().toString());
+                o.addProperty("name", ref.name());
+                yield content(o.toString(), false);
             }
             case "delete_companion" -> {
                 UUID id = resolveCompanion(principal, args);
@@ -296,8 +299,11 @@ public final class ServerMcpServer {
                 UUID id = resolveCompanion(principal, args);
                 if (id == null) yield content("no such companion", true);
                 Lease l = await(actuator.acquireControl(principal, id));
-                yield content("{\"lease_id\":\"" + l.leaseId() + "\",\"fencing_token\":" + l.fencingToken()
-                        + ",\"companion\":\"" + id + "\"}", false);
+                JsonObject o = new JsonObject();
+                o.addProperty("lease_id", l.leaseId());
+                o.addProperty("fencing_token", l.fencingToken());
+                o.addProperty("companion", id.toString());
+                yield content(o.toString(), false);
             }
             case "release_control" -> {
                 UUID id = resolveCompanion(principal, args);
@@ -310,9 +316,16 @@ public final class ServerMcpServer {
                 if (id == null) yield content("no such companion", true);
                 String requestedTaskId = asString(args.get("task_id"));
                 TaskStatus st = await(actuator.getTaskStatus(principal, id, requestedTaskId));
-                String resultField = st.resultJson() == null ? "null" : st.resultJson();
-                yield content("{\"state\":\"" + st.state() + "\",\"task_id\":" + jstr(st.taskId())
-                        + ",\"detail\":" + gson.toJson(st.detail()) + ",\"result\":" + resultField + "}",
+                JsonObject o = new JsonObject();
+                o.addProperty("state", st.state());
+                o.addProperty("task_id", st.taskId());
+                o.addProperty("detail", st.detail());
+                if (st.resultJson() != null) {
+                    o.add("result", JsonParser.parseString(st.resultJson()));
+                } else {
+                    o.add("result", com.google.gson.JsonNull.INSTANCE);
+                }
+                yield content(o.toString(),
                         "error".equals(st.state()));
             }
             case "task_stop" -> {
@@ -352,13 +365,24 @@ public final class ServerMcpServer {
         try {
             return UUID.fromString(raw.trim());
         } catch (IllegalArgumentException ignored) { /* name lookup below */ }
-        for (CompanionRef c : await(actuator.listCompanions(principal))) {
-            if (c.name().equals(raw)) return c.id();
+        List<CompanionRef> all = await(actuator.listCompanions(principal));
+        // 精确匹配必须唯一；否则拒绝(名字歧义时宁可失败，不静默选第一个)。
+        CompanionRef exact = null;
+        for (CompanionRef c : all) {
+            if (c.name().equals(raw)) {
+                if (exact != null) return null;
+                exact = c;
+            }
         }
-        for (CompanionRef c : await(actuator.listCompanions(principal))) {
-            if (c.name().equalsIgnoreCase(raw)) return c.id();
+        if (exact != null) return exact.id();
+        CompanionRef folded = null;
+        for (CompanionRef c : all) {
+            if (c.name().equalsIgnoreCase(raw)) {
+                if (folded != null) return null;
+                folded = c;
+            }
         }
-        return null;
+        return folded == null ? null : folded.id();
     }
 
     private <T> T await(CompletableFuture<T> f) {
@@ -472,9 +496,6 @@ public final class ServerMcpServer {
         return e != null && e.isJsonPrimitive() && e.getAsJsonPrimitive().isString() ? e.getAsString() : null;
     }
 
-    private static String jstr(String s) {
-        return s == null ? "null" : "\"" + s + "\"";
-    }
 
     private void respondJson(HttpExchange ex, JsonElement json) throws IOException {
         byte[] bytes = gson.toJson(json).getBytes(StandardCharsets.UTF_8);

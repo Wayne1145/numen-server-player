@@ -63,6 +63,35 @@ class CompanionBindingTest(unittest.TestCase):
 
 
 class ExactTaskExecutionTest(unittest.TestCase):
+    def test_release_failure_does_not_lose_dispatch_task_id(self):
+        mcp = FakeMcp([{"state": "done", "task_id": "t9", "result": {"success": True}}])
+        release_calls = 0
+        original_call = mcp.call
+
+        def flaky_release(name, arguments):
+            nonlocal release_calls
+            if name == "release_control":
+                release_calls += 1
+                raise RuntimeError("network hiccup on release")
+            return original_call(name, arguments)
+
+        mcp.call = flaky_release
+        observed = []
+        outcome = execute_tool_exact(
+            mcp,
+            companion="ABBrain",
+            name="goto",
+            arguments={"x": 6.5, "y": None, "z": 0.5},
+            requires_control=True,
+            sleep=lambda _: None,
+            on_dispatched=lambda dispatch, task_id: observed.append(task_id),
+        )
+
+        self.assertEqual("t9", observed[0])
+        self.assertEqual("t9", outcome["task_id"])
+        self.assertEqual("done", outcome["terminal"]["state"])
+        self.assertEqual(1, release_calls)
+
     def test_write_action_uses_ephemeral_lease_and_exact_terminal_task_id(self):
         mcp = FakeMcp([
             {"state": "running", "task_id": "t9", "result": None},
@@ -114,6 +143,21 @@ class ExactTaskExecutionTest(unittest.TestCase):
 
 
 class PersistentActionTurnTest(unittest.TestCase):
+    def test_checkpoint_write_fsyncs_parent_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            import action_brain
+            original = action_brain.fsync_dir
+            synced = []
+            action_brain.fsync_dir = lambda path: synced.append(path)
+            try:
+                checkpoint.write({"state": "tool_planned", "turn_id": "t"})
+            finally:
+                action_brain.fsync_dir = original
+            self.assertEqual([root], synced)
+            self.assertEqual({"state": "tool_planned", "turn_id": "t"}, checkpoint.read())
+
     def test_invalid_model_format_is_retried_without_persisting_correction_noise(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

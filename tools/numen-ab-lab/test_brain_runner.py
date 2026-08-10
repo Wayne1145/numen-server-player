@@ -6,12 +6,14 @@ from pathlib import Path
 from brain_runner import (
     execute_tool_with_ephemeral_lease,
     inject_control_args,
+    model_tools,
     parse_decision,
     retry_transient,
     save_checkpoint,
     score_move_trace,
     tool_requires_control,
 )
+from brain_runner import McpClient
 
 
 class ParseDecisionTest(unittest.TestCase):
@@ -37,6 +39,26 @@ class ParseDecisionTest(unittest.TestCase):
 
 
 class ResilienceTest(unittest.TestCase):
+    def test_mcp_call_raises_on_is_error_result(self):
+        client = McpClient()
+
+        def fake_rpc(method, params):
+            return {
+                "content": [{"type": "text", "text": "boom", "isError": True}],
+            }
+
+        client.rpc = fake_rpc
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            client.call("goto", {"x": 1})
+
+    def test_model_tools_rejects_duplicate_tool_names(self):
+        live_tools = [
+            {"name": "goto", "description": "a", "inputSchema": {"type": "object"}},
+            {"name": "goto", "description": "b", "inputSchema": {"type": "object"}},
+        ]
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            model_tools(live_tools)
+
     def test_transient_502_retries_only_current_call(self):
         attempts = []
 
@@ -86,6 +108,31 @@ class ControlAndScoringTest(unittest.TestCase):
                 ("release_control", {"companion": "ABWalker", "lease_id": "lease-ephemeral"}),
             ],
             mcp.calls,
+        )
+
+    def test_release_failure_does_not_lose_dispatch_result(self):
+        class FlakyReleaseMcp:
+            def __init__(self):
+                self.calls = []
+
+            def call(self, name, arguments):
+                self.calls.append((name, arguments))
+                if name == "acquire_control":
+                    return {"lease_id": "lease-ephemeral"}
+                if name == "release_control":
+                    raise RuntimeError("network hiccup on release")
+                return {"success": True, "data": {"task_id": "t42"}}
+
+        mcp = FlakyReleaseMcp()
+        result, lease_id = execute_tool_with_ephemeral_lease(
+            mcp, companion="ABWalker", name="goto", arguments={"x": 6, "z": 0},
+            requires_control=True,
+        )
+        self.assertEqual({"success": True, "data": {"task_id": "t42"}}, result)
+        self.assertEqual("lease-ephemeral", lease_id)
+        self.assertEqual(
+            ["acquire_control", "goto", "release_control"],
+            [name for name, _ in mcp.calls],
         )
 
     def test_schema_lease_property_requires_control_even_when_not_required(self):

@@ -82,14 +82,13 @@ public final class ChatTool implements NumenTool {
             var bound = new ChatType.Bound(chatType, companion.getDisplayName(), Component.empty());
             PlayerChatMessage msg = PlayerChatMessage.system(text);
             server.getPlayerList().broadcastChatMessage(msg, companion, bound);
-            reply.accept("{\"success\":true,\"message\":\"said: "
-                    + text.replace("\"", "'") + "\"}");
+            // TaskResult.toJson() 用 Gson 转义，text 含引号/反斜杠/换行也不会破坏 JSON。
+            reply.accept(TaskResult.ok("said: " + text).toJson());
         } catch (Exception ex) {
             // 兜底：系统消息广播，仍然带假人名字。
             server.getPlayerList().broadcastSystemMessage(
                     Component.literal("[" + companion.getName().getString() + "] " + text), false);
-            reply.accept("{\"success\":true,\"message\":\"said (system): "
-                    + text.replace("\"", "'") + "\"}");
+            reply.accept(TaskResult.ok("said (system): " + text).toJson());
         }
     }
 }

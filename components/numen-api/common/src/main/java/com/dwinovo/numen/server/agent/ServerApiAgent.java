@@ -124,14 +124,14 @@ public final class ServerApiAgent {
             String raw = call.arguments();
             args = raw == null || raw.isBlank() ? new JsonObject() : JsonParser.parseString(raw).getAsJsonObject();
         } catch (RuntimeException ex) {
-            return "{\"success\":false,\"message\":\"bad tool arguments: " + ex.getMessage() + "\"}";
+            return jsonResult(false, "bad tool arguments: " + ex.getMessage());
         }
         ToolResult r = await(actuator.invoke(principal, companionId, lease.leaseId(), call.name(), args));
         if (r.taskId() == null) return r.json();   // query / immediate result
         // Async action: wait for the body to go idle so the model sees the finished state.
         long deadline = System.currentTimeMillis() + invokeTimeoutSeconds * 1000L;
         while (System.currentTimeMillis() < deadline) {
-            if (state == State.STOPPED) return "{\"success\":false,\"message\":\"stopped\"}";
+            if (state == State.STOPPED) return jsonResult(false, "stopped");
             TaskStatus st = await(actuator.getTaskStatus(principal, companionId, r.taskId()));
             if ("running".equals(st.state()) || "queued".equals(st.state())) {
                 Thread.sleep(pollMs);
@@ -140,17 +140,28 @@ public final class ServerApiAgent {
             if ("done".equals(st.state()) || "failed".equals(st.state())
                     || "timeout".equals(st.state()) || "stopped".equals(st.state())) {
                 if (st.resultJson() != null && !st.resultJson().isBlank()) return st.resultJson();
-                return "{\"success\":" + "done".equals(st.state())
-                        + ",\"message\":\"" + st.detail().replace("\"", "'") + "\"}";
+                return jsonResult("done".equals(st.state()), st.detail());
             }
             if ("idle".equals(st.state())) {
-                return "{\"success\":false,\"message\":\"task " + r.taskId()
-                        + " terminal result unavailable; body idle — perceive to verify\",\"dispatch\":" + r.json() + "}";
+                JsonObject o = new JsonObject();
+                o.addProperty("success", false);
+                o.addProperty("message", "task " + r.taskId()
+                        + " terminal result unavailable; body idle — perceive to verify");
+                o.add("dispatch", JsonParser.parseString(r.json()));
+                return o.toString();
             }
-            if ("error".equals(st.state())) return "{\"success\":false,\"message\":\"" + st.detail() + "\"}";
+            if ("error".equals(st.state())) return jsonResult(false, st.detail());
             Thread.sleep(pollMs);
         }
-        return "{\"success\":false,\"message\":\"task " + r.taskId() + " still running at timeout\"}";
+        return jsonResult(false, "task " + r.taskId() + " still running at timeout");
+    }
+
+    /** Gson 构造的固定信封：message 永远被正确转义，模型读到的始终是合法 JSON。 */
+    private static String jsonResult(boolean success, String message) {
+        JsonObject o = new JsonObject();
+        o.addProperty("success", success);
+        if (message != null) o.addProperty("message", message);
+        return o.toString();
     }
 
     private <T> T await(CompletableFuture<T> f) throws Exception {
