@@ -176,6 +176,7 @@ public final class ServerNumenActuatorImpl implements ServerNumenActuator {
                 if (live != null) CompanionFactory.despawn(s, live);
                 CompanionRegistry.get(s).remove(companionId);
                 leases.releaseAll(companionId);
+                ExternalTaskResultStore.clear(companionId);
             }
             audit.record(rec(principal.id(), "actuator", companionId, "delete_companion", null, null,
                     System.currentTimeMillis() - t0, ok, ok ? "ok" : "denied_or_missing"));
@@ -311,8 +312,22 @@ public final class ServerNumenActuatorImpl implements ServerNumenActuator {
                 return TaskStatus.error("unauthorized");
             }
             TaskRecord rc = CompanionTickDispatcher.asyncTaskFor(companionId);
-            TaskStatus st = rc == null ? TaskStatus.idle()
-                    : new TaskStatus(rc.publicId(), rc.getState() == TaskState.RUNNING ? "running" : "queued", rc.describe());
+            TaskStatus st;
+            if (taskId != null && !taskId.isBlank()) {
+                if (rc != null && taskId.equals(rc.publicId())) {
+                    st = new TaskStatus(rc.publicId(),
+                            rc.getState() == TaskState.RUNNING ? "running" : "queued", rc.describe());
+                } else {
+                    TaskStatus terminal = ExternalTaskResultStore.get(companionId, taskId);
+                    st = terminal == null
+                            ? TaskStatus.error("unknown task_id: " + taskId)
+                            : terminal;
+                }
+            } else {
+                st = rc == null ? TaskStatus.idle()
+                        : new TaskStatus(rc.publicId(),
+                        rc.getState() == TaskState.RUNNING ? "running" : "queued", rc.describe());
+            }
             audit.record(rec(principal.id(), "actuator", companionId, "task_status", st.taskId(), null,
                     System.currentTimeMillis() - t0, true, "ok"));
             return st;

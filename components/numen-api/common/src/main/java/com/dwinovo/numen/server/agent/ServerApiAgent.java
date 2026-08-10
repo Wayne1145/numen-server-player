@@ -133,9 +133,19 @@ public final class ServerApiAgent {
         while (System.currentTimeMillis() < deadline) {
             if (state == State.STOPPED) return "{\"success\":false,\"message\":\"stopped\"}";
             TaskStatus st = await(actuator.getTaskStatus(principal, companionId, r.taskId()));
+            if ("running".equals(st.state()) || "queued".equals(st.state())) {
+                Thread.sleep(pollMs);
+                continue;
+            }
+            if ("done".equals(st.state()) || "failed".equals(st.state())
+                    || "timeout".equals(st.state()) || "stopped".equals(st.state())) {
+                if (st.resultJson() != null && !st.resultJson().isBlank()) return st.resultJson();
+                return "{\"success\":" + "done".equals(st.state())
+                        + ",\"message\":\"" + st.detail().replace("\"", "'") + "\"}";
+            }
             if ("idle".equals(st.state())) {
-                return "{\"success\":true,\"message\":\"task " + r.taskId()
-                        + " finished; body idle — perceive to confirm\",\"dispatch\":" + r.json() + "}";
+                return "{\"success\":false,\"message\":\"task " + r.taskId()
+                        + " terminal result unavailable; body idle — perceive to verify\",\"dispatch\":" + r.json() + "}";
             }
             if ("error".equals(st.state())) return "{\"success\":false,\"message\":\"" + st.detail() + "\"}";
             Thread.sleep(pollMs);

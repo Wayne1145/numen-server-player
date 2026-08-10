@@ -32,6 +32,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -58,6 +59,9 @@ public final class ServerMcpServer {
 
     private static final Logger LOG = LoggerFactory.getLogger("numen-mcp");
     private static final String PROTOCOL_VERSION = "2025-06-18";
+    private static final Set<String> MANAGEMENT_TOOL_NAMES = Set.of(
+            "list_companions", "create_companion", "delete_companion",
+            "acquire_control", "release_control", "task_status", "task_stop");
 
     private static final String INSTRUCTIONS = """
             Numen companions are player-like characters in a live Minecraft server. Through this MCP \
@@ -252,10 +256,13 @@ public final class ServerMcpServer {
         tools.add(tool("acquire_control", "Take the single write lease over a companion. Returns lease_id.",
                 objSchema(true, false)));
         tools.add(tool("release_control", "Release a previously-acquired lease.", objSchema(true, true)));
-        tools.add(tool("task_status", "Read the companion's background-task status.", objSchema(true, false)));
+        tools.add(tool("task_status", "Read the companion's active task, or query a retained terminal result by task_id.",
+                taskStatusSchema()));
         tools.add(tool("task_stop", "Abort the companion's background task.", objSchema(true, true)));
         // Engine tools, filtered by capability policy (whitelist only; destructive only if enabled).
         for (NumenTool t : ToolRegistry.all()) {
+            // 管理工具由上方 MCP 层提供；同名引擎工具会制造重复 Schema，并让客户端随机选中旧契约。
+            if (MANAGEMENT_TOOL_NAMES.contains(t.name())) continue;
             ToolCapability cap = ToolCatalog.of(t.name());
             if (!cap.isServerExposable() || !policy.capabilityEnabled(cap)) continue;
             tools.add(tool(t.name(), t.description(), withCompanionAndLease(t.parameterSchema(), cap.requiresControl())));
@@ -301,9 +308,12 @@ public final class ServerMcpServer {
             case "task_status" -> {
                 UUID id = resolveCompanion(principal, args);
                 if (id == null) yield content("no such companion", true);
-                TaskStatus st = await(actuator.getTaskStatus(principal, id, null));
+                String requestedTaskId = asString(args.get("task_id"));
+                TaskStatus st = await(actuator.getTaskStatus(principal, id, requestedTaskId));
+                String resultField = st.resultJson() == null ? "null" : st.resultJson();
                 yield content("{\"state\":\"" + st.state() + "\",\"task_id\":" + jstr(st.taskId())
-                        + ",\"detail\":" + gson.toJson(st.detail()) + "}", "error".equals(st.state()));
+                        + ",\"detail\":" + gson.toJson(st.detail()) + ",\"result\":" + resultField + "}",
+                        "error".equals(st.state()));
             }
             case "task_stop" -> {
                 UUID id = resolveCompanion(principal, args);
@@ -384,6 +394,13 @@ public final class ServerMcpServer {
         if (lease) { props.add("lease_id", strProp("The lease_id from acquire_control.")); }
         s.add("properties", props);
         if (!required.isEmpty()) s.add("required", required);
+        return s;
+    }
+
+    private JsonObject taskStatusSchema() {
+        JsonObject s = objSchema(true, false);
+        s.getAsJsonObject("properties").add("task_id",
+                strProp("Optional task_id returned by an action. When supplied, terminal done/failed/timeout/stopped result is retained and returned."));
         return s;
     }
 

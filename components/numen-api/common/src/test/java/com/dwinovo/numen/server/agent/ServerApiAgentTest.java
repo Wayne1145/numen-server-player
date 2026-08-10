@@ -73,7 +73,8 @@ class ServerApiAgentTest {
             log.add("status#" + statusPolls);
             return CompletableFuture.completedFuture(statusPolls < 2
                     ? new TaskStatus("t9", "running", "goto")
-                    : TaskStatus.idle());
+                    : new TaskStatus("t9", "done", "goto: arrived",
+                    "{\"success\":true,\"message\":\"arrived\",\"data\":{\"final_x\":1}}"));
         }
         @Override public CompletableFuture<Void> stopTask(McpPrincipal p, UUID id, String taskId) {
             log.add("stopTask");
@@ -101,11 +102,11 @@ class ServerApiAgentTest {
 
         assertEquals("done — arrived", out);
         assertEquals(ServerApiAgent.State.IDLE, agent.state());
-        // Order: acquire → both tools through the actuator (goto polled to idle) → release.
+        // Order: acquire → both tools through the actuator (goto polled to terminal done) → release.
         assertEquals("acquire", act.log.get(0));
         assertTrue(act.log.contains("invoke:get_self_status"));
         assertTrue(act.log.contains("invoke:goto"));
-        assertTrue(act.log.contains("status#2"), "async goto polled until idle: " + act.log);
+        assertTrue(act.log.contains("status#2"), "async goto polled until terminal result: " + act.log);
         assertEquals("release:L1", act.log.get(act.log.size() - 1));
         assertTrue(act.log.indexOf("invoke:goto") < act.log.indexOf("status#1"));
     }

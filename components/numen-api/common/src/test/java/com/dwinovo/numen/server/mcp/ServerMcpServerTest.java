@@ -11,6 +11,7 @@ import com.dwinovo.numen.server.SecurityPolicy;
 import com.dwinovo.numen.server.ServerNumenActuator;
 import com.dwinovo.numen.server.TaskStatus;
 import com.dwinovo.numen.server.ToolResult;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.AfterEach;
@@ -42,6 +43,7 @@ class ServerMcpServerTest {
     /** A canned actuator: one companion "Bot", trivial leases, a goto that returns a task_id. */
     static final class MockActuator implements ServerNumenActuator {
         final UUID bot = UUID.randomUUID();
+        volatile String lastRequestedTaskId;
 
         @Override public CompletableFuture<List<CompanionRef>> listCompanions(McpPrincipal p) {
             return CompletableFuture.completedFuture(List.of(new CompanionRef(bot, "Bot", ServerOwner.ID, true)));
@@ -66,6 +68,11 @@ class ServerMcpServerTest {
             return CompletableFuture.completedFuture(ToolResult.of("{\"success\":true,\"message\":\"ok\"}"));
         }
         @Override public CompletableFuture<TaskStatus> getTaskStatus(McpPrincipal p, UUID id, String taskId) {
+            lastRequestedTaskId = taskId;
+            if ("t1".equals(taskId)) {
+                return CompletableFuture.completedFuture(new TaskStatus("t1", "done", "goto: arrived",
+                        "{\"success\":true,\"message\":\"arrived\"}"));
+            }
             return CompletableFuture.completedFuture(new TaskStatus("t1", "running", "goto 0/1"));
         }
         @Override public CompletableFuture<Void> stopTask(McpPrincipal p, UUID id, String taskId) {
@@ -75,6 +82,7 @@ class ServerMcpServerTest {
 
     private static final String TOKEN = "secret-token";
     private ServerMcpServer server;
+    private MockActuator mockActuator;
     private String url;
     private final HttpClient http = HttpClient.newHttpClient();
 
@@ -82,7 +90,8 @@ class ServerMcpServerTest {
     void setUp() throws Exception {
         McpNetConfig cfg = new McpNetConfig(true, "127.0.0.1", 0, 64 * 1024, 16, 32, 4, 10, 1000);
         AuthTokens tokens = new AuthTokens(Map.of(TOKEN, McpPrincipal.admin("mcp-admin")));
-        server = new ServerMcpServer(cfg, new MockActuator(), tokens, SecurityPolicy.defaults());
+        mockActuator = new MockActuator();
+        server = new ServerMcpServer(cfg, mockActuator, tokens, SecurityPolicy.defaults());
         server.start();
         url = "http://127.0.0.1:" + server.boundPort() + "/mcp";
     }
@@ -120,10 +129,28 @@ class ServerMcpServerTest {
 
         // tools/list contains the management tools
         JsonObject list = rpc("tools/list", null);
-        String toolsJson = list.getAsJsonObject("result").get("tools").toString();
+        JsonArray listedTools = list.getAsJsonObject("result").getAsJsonArray("tools");
+        String toolsJson = listedTools.toString();
         assertTrue(toolsJson.contains("acquire_control"), toolsJson);
         assertTrue(toolsJson.contains("list_companions"));
         assertTrue(toolsJson.contains("task_status"));
+
+        // 管理工具不能再被 ToolRegistry 中的同名引擎工具重复暴露，否则客户端可能选到旧 Schema。
+        int taskStatusCount = 0;
+        int taskStopCount = 0;
+        JsonObject taskStatusTool = null;
+        for (var element : listedTools) {
+            JsonObject listed = element.getAsJsonObject();
+            String listedName = listed.get("name").getAsString();
+            if ("task_status".equals(listedName)) {
+                taskStatusCount++;
+                taskStatusTool = listed;
+            }
+            if ("task_stop".equals(listedName)) taskStopCount++;
+        }
+        assertEquals(1, taskStatusCount, toolsJson);
+        assertEquals(1, taskStopCount, toolsJson);
+        assertTrue(taskStatusTool.getAsJsonObject("inputSchema").getAsJsonObject("properties").has("task_id"));
 
         // acquire_control -> lease_id
         JsonObject acq = rpc("tools/call", "{\"name\":\"acquire_control\",\"arguments\":{\"companion\":\"Bot\"}}");
@@ -137,10 +164,19 @@ class ServerMcpServerTest {
         assertFalse(goResult.get("isError").getAsBoolean());
         assertTrue(goResult.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString().contains("t1"));
 
-        // task_status -> running
+        // task_status without id -> running
         JsonObject st = rpc("tools/call", "{\"name\":\"task_status\",\"arguments\":{\"companion\":\"Bot\"}}");
         assertTrue(st.getAsJsonObject("result").getAsJsonArray("content").get(0).getAsJsonObject()
                 .get("text").getAsString().contains("running"));
+
+        // task_status with id -> retained terminal result; task_id must reach the actuator.
+        JsonObject done = rpc("tools/call",
+                "{\"name\":\"task_status\",\"arguments\":{\"companion\":\"Bot\",\"task_id\":\"t1\"}}");
+        String doneText = done.getAsJsonObject("result").getAsJsonArray("content").get(0)
+                .getAsJsonObject().get("text").getAsString();
+        assertTrue(doneText.contains("\"state\":\"done\""), doneText);
+        assertTrue(doneText.contains("\"result\":{\"success\":true"), doneText);
+        assertEquals("t1", mockActuator.lastRequestedTaskId);
 
         // release_control
         JsonObject rel = rpc("tools/call",

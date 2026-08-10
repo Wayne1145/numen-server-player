@@ -126,17 +126,19 @@ public final class LlmTaskChain implements TaskChain {
         List<TaskRecord> completed = queue.drainCompleted();
         if (completed.isEmpty()) return;
         ServerPlayer owner = player.resolveOwnerPlayer();
-        if (owner == null) return;
         for (TaskRecord rec : completed) {
             TaskResult result = rec.getResult();
+            // 外部(MCP/API)异步任务没有客户端大脑接收 task_finished；先保存结构化终态，
+            // task_status(task_id) 才能在 active slot 清空后继续返回 done/failed/timeout/stopped。
+            if (rec.isAsync() && rec.isExternalCall()) {
+                com.dwinovo.numen.server.ExternalTaskResultStore.record(
+                        player.getUUID(), rec.publicId(), rec.getState(), rec.getToolName(), result);
+                continue;
+            }
             // 异步记录:tool_call 在受理时就回执过了,收尾改走 task_finished 事件
             // (done/failed/timeout 唤醒,stopped 搭车——档位在事件登记处定)。
             if (rec.isAsync()) {
-                // 外部(MCP)派的异步任务:不投 task_finished 事件——那条会唤醒并没有派它的内置大脑。
-                // 外部驱动靠 task_status 轮询 + 感知确认闭环(见 TaskDispatch/NumenActuator)。
-                if (rec.isExternalCall()) {
-                    continue;
-                }
+                if (owner == null) continue;
                 String status = switch (rec.getState()) {
                     case SUCCESS -> "done";
                     case TIMEOUT -> "timeout";
@@ -151,6 +153,7 @@ public final class LlmTaskChain implements TaskChain {
             String json = result == null
                     ? "{\"success\":false,\"message\":\"no result produced\"}"
                     : result.toJson();
+            if (owner == null) continue;
             Services.NETWORK.sendToPlayer(owner,
                     new TaskResultPayload(player.getUUID(), rec.getToolCallId(), json));
         }
