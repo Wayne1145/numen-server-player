@@ -3,6 +3,11 @@ sessions/
 results/
 checkpoints/
 locks/
+cursors/
+memory/
+inbox/
+.env
+.env.*
 __pycache__/
 *.pyc
 server_control.json

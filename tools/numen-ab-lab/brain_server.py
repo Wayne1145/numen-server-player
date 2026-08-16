@@ -10,7 +10,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 
-from action_brain import ActionBrainRuntime, TurnCheckpoint, resolve_companion_id
+from action_brain import (
+    ActionBrainRuntime,
+    CompanionRunLock,
+    TurnCheckpoint,
+    resolve_companion_id,
+)
 from brain_runner import McpClient, model_tools
 from event_inbox import EventInbox
 from persistent_brain import BrainSessionStore
@@ -49,6 +54,7 @@ class CompanionContext:
         self.memory = WorldMemoryStore(
             ROOT / "memory" / server_id / f"{self.companion_id}.json")
         self.inbox = EventInbox(ROOT / "inbox" / server_id / f"{self.companion_id}.jsonl")
+        self.lock_path = paths["lock"]
 
         live_tools = mcp.tools()
         tools, requires_control = model_tools(live_tools)
@@ -87,23 +93,36 @@ class CompanionContext:
     def list_companions(self) -> str:
         return self.listing_text
 
+    def list_recent_events(self, count: int = 50) -> list[dict[str, Any]]:
+        result = self.mcp.call("get_recent_events",
+                               {"companion": self.companion, "count": count})
+        if isinstance(result, dict) and isinstance(result.get("events"), list):
+            return result["events"]
+        return []
+
+    def get_self_status(self) -> dict[str, Any]:
+        result = self.mcp.call("get_self_status", {"companion": self.companion})
+        return result if isinstance(result, dict) else {}
+
     def run_turn(self, message: str) -> dict[str, Any]:
         with self.lock:
-            if self.store.should_compact(max_messages=COMPACT_MAX_MESSAGES,
-                                         max_chars=COMPACT_MAX_CHARS):
-                compact_history(self.store, create_compactor(live_transport))
-            before = len(self.store.messages())
-            result = self.runtime.run_turn(attach_events(message, self.inbox.read()))
-            self.inbox.clear()
-            return {"final": result["final"], "actions": result["actions"],
-                    "history_before": before, "history_after": len(self.store.messages())}
+            with CompanionRunLock(self.lock_path):
+                if self.store.should_compact(max_messages=COMPACT_MAX_MESSAGES,
+                                             max_chars=COMPACT_MAX_CHARS):
+                    compact_history(self.store, create_compactor(live_transport))
+                before = len(self.store.messages())
+                result = self.runtime.run_turn(attach_events(message, self.inbox.read()))
+                self.inbox.clear()
+                return {"final": result["final"], "actions": result["actions"],
+                        "history_before": before, "history_after": len(self.store.messages())}
 
     def recover_turn(self) -> dict[str, Any]:
         with self.lock:
-            before = len(self.store.messages())
-            result = self.runtime.recover_turn()
-            return {"final": result["final"], "actions": result.get("actions", []),
-                    "history_before": before, "history_after": len(self.store.messages())}
+            with CompanionRunLock(self.lock_path):
+                before = len(self.store.messages())
+                result = self.runtime.recover_turn()
+                return {"final": result["final"], "actions": result.get("actions", []),
+                        "history_before": before, "history_after": len(self.store.messages())}
 
     def history(self) -> list[dict[str, str]]:
         return self.store.messages()

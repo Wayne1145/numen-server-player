@@ -1,0 +1,14 @@
+[Unit]
+Description=Numen Active Agent (auto-reply + survival loop)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.hermes/workspace/numen-ab-lab/.env.active-agent
+ExecStart=%h/.hermes/workspace/numen-ab-lab/active_agent_cli.py --server-id numen-ab --poll 15 --cooldown 120
+WorkingDirectory=%h/.hermes/workspace/numen-ab-lab
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -16,6 +16,9 @@ OpenAI-compatible 模型路由。仓库内保留的是**干净公开版**：凭�
 - `world_memory.py` — 世界记忆：`remember_block`/`recall_blocks` 按同伴隔离。
 - `event_inbox.py` — 服务器事件收件箱（回合开始附加，成功提交后消费）。
 - `brain_server.py` — 常驻 HTTP API + Web UI（多服路径、Bearer 认证）。
+- `active_agent.py` — 主动行为循环：事件游标、提及/死亡触发、生存检查、冷却。
+- `active_agent_cli.py` — 主动守护进程入口（`--once` 单轮调试 / `run_forever` 常驻）。
+- `deploy/` — systemd 服务文件、env 模板、部署文档。
 - `webui/` — 同伴控制台前端（对话/历史/记忆/事件）。
 - `personas/` `skills/` — 角色卡与技能库（`--persona`、`load_skill`）。
 - `terminal_result_acceptance.py` — MCP 任务终态（done/failed/stopped）隔离验收脚本。
