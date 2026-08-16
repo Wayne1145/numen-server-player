@@ -8,6 +8,7 @@ memory/
 inbox/
 .env
 .env.*
+!.env.*.example
 __pycache__/
 *.pyc
 server_control.json
