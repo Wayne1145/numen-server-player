@@ -60,6 +60,24 @@
 const $ = id => document.getElementById(id);
 let current = null;
 let serverId = () => $('server').value || 'numen-ab';
+
+// Token 三来源（优先级从高到低）：
+// 1) URL ?token=xxx（启动器打印的直达链接）→ 自动填入 + 记住
+// 2) localStorage 里记住的上次 token
+// 3) 手动输入框
+(function initToken() {
+  const urlToken = new URLSearchParams(location.search).get('token');
+  const saved = localStorage.getItem('numen-webui-token');
+  if (urlToken) {
+    localStorage.setItem('numen-webui-token', urlToken);
+    $('token').value = urlToken;
+  } else if (saved) {
+    $('token').value = saved;
+  }
+})();
+$('token').addEventListener('change', () => {
+  localStorage.setItem('numen-webui-token', $('token').value.trim());
+});
 let auth = () => $('token').value ? { 'Authorization': 'Bearer ' + $('token').value } : {};
 
 async function api(path, options) {
@@ -87,10 +105,31 @@ async function sendTurn() {
   $('chat').textContent = '… ' + message;
   $('message').value = '';
   try {
-    const data = await api('/v1/turns', { method: 'POST', body: JSON.stringify({ server: serverId(), companion: current, message }) });
+    let data = await api('/v1/turns', { method: 'POST', body: JSON.stringify({ server: serverId(), companion: current, message }) });
+    // 服务端返回 busy 提示时给出可见说明
+    if (data.busy) { $('chat').textContent = '（该同伴正被后台自动大脑驱动）' + data.final; return; }
     $('chat').textContent = data.final + '\n\n' + JSON.stringify(data.actions, null, 2);
     loadHistory();
-  } catch (e) { $('chat').textContent = '错误：' + e.message; }
+  } catch (e) {
+    const msg = String(e.message);
+    // 上一次回合被中断（工具已执行但未收尾）→ 自动恢复，再重试发送
+    if (msg.includes('checkpoint') || msg.includes('RecoveryRequired') || msg.includes('recover')) {
+      $('chat').textContent = '检测到未完成回合，正在自动恢复…';
+      try {
+        const rec = await api('/v1/recover', { method: 'POST', body: JSON.stringify({ server: serverId(), companion: current }) });
+        $('chat').textContent = '已恢复：' + rec.final;
+        // 恢复后重试用户指令
+        if (message) {
+          $('chat').textContent += '\n\n… 继续：' + message;
+          const data = await api('/v1/turns', { method: 'POST', body: JSON.stringify({ server: serverId(), companion: current, message }) });
+          $('chat').textContent = data.final + '\n\n' + JSON.stringify(data.actions, null, 2);
+          loadHistory();
+        }
+      } catch (e2) { $('chat').textContent = '恢复失败：' + e2.message; }
+    } else {
+      $('chat').textContent = '错误：' + msg;
+    }
+  }
 }
 
 async function loadHistory() {

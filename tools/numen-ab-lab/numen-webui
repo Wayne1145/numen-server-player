@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# numen-webui：一条命令启动 Numen 同伴控制台（WebUI）。
+# 用法:
+#   numen-webui              # 启动（端口 18777，token 自动从 .env 或默认值）
+#   numen-webui --port 9000  # 指定端口
+#   numen-webui --no-token   # 本机无鉴权模式（仅限 127.0.0.1，方便内网调试）
+#
+# 启动后终端会打印 direct_url，直接复制到浏览器即可打开（已带 token，无需输入）。
+set -euo pipefail
+
+LAB_DIR="${NUMEN_LAB_DIR:-$HOME/.hermes/workspace/numen-ab-lab}"
+PORT="${NUMEN_WEBUI_PORT:-18777}"
+TOKEN="${NUMEN_WEBUI_TOKEN:-numen-webui-2026}"
+NO_TOKEN=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --port=*) PORT="${arg#--port=}" ;;
+    --port) PORT="$2"; shift ;;
+    --no-token) NO_TOKEN=1 ;;
+    --token=*) TOKEN="${arg#--token=}" ;;
+    --token) TOKEN="$2"; shift ;;
+    *) echo "未知参数: $arg" >&2; exit 1 ;;
+  esac
+  shift
+done
+
+cd "$LAB_DIR"
+
+# 加载 MCP/LLM 配置（.env.active-agent 存在则使用）
+if [ -f .env.active-agent ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env.active-agent
+  set +a
+fi
+
+ARGS=(--port "$PORT")
+if [ "$NO_TOKEN" -eq 1 ]; then
+  ARGS+=(--token "")
+else
+  ARGS+=(--token "$TOKEN")
+fi
+
+echo "==> Numen WebUI 启动中 (port=$PORT)"
+python3 brain_server.py "${ARGS[@]}"

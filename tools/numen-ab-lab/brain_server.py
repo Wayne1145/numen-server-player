@@ -6,6 +6,7 @@ import argparse
 import json
 import re
 import threading
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -106,15 +107,22 @@ class CompanionContext:
 
     def run_turn(self, message: str) -> dict[str, Any]:
         with self.lock:
-            with CompanionRunLock(self.lock_path):
-                if self.store.should_compact(max_messages=COMPACT_MAX_MESSAGES,
-                                             max_chars=COMPACT_MAX_CHARS):
-                    compact_history(self.store, create_compactor(live_transport))
-                before = len(self.store.messages())
-                result = self.runtime.run_turn(attach_events(message, self.inbox.read()))
-                self.inbox.clear()
-                return {"final": result["final"], "actions": result["actions"],
-                        "history_before": before, "history_after": len(self.store.messages())}
+            try:
+                with CompanionRunLock(self.lock_path):
+                    if self.store.should_compact(max_messages=COMPACT_MAX_MESSAGES,
+                                                 max_chars=COMPACT_MAX_CHARS):
+                        compact_history(self.store, create_compactor(live_transport))
+                    before = len(self.store.messages())
+                    result = self.runtime.run_turn(attach_events(message, self.inbox.read()))
+                    self.inbox.clear()
+                    return {"final": result["final"], "actions": result["actions"],
+                            "history_before": before, "history_after": len(self.store.messages())}
+            except BlockingIOError:
+                # 同伴正被另一个大脑驱动（常驻 active agent / 其他 WebUI 会话）。
+                # 返回友好提示，而不是 500 空回复——让前端能直接展示原因。
+                return {"final": "该同伴正在被后台自动大脑驱动（例如名字提及自动回话），"
+                                 "请稍候几秒再试，或先停止 numen-active-agent 服务。",
+                        "actions": [], "busy": True}
 
     def recover_turn(self) -> dict[str, Any]:
         with self.lock:
@@ -138,8 +146,14 @@ def make_handler(context_factory: Callable[[str, str | None, str | None], Compan
                  token: str, static_dir: Path) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def _auth(self) -> bool:
+            # 两种方式二选一：
+            # 1) Authorization: Bearer <token>（API/前端 fetch 用）
+            # 2) URL 查询参数 ?token=<token>（浏览器地址栏直达用，方便一键打开）
             header = self.headers.get("Authorization", "")
-            return header == "Bearer " + token
+            if header == "Bearer " + token:
+                return True
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            return query.get("token", [""])[0] == token
 
         def _json(self, status: int, payload: Any) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -156,6 +170,11 @@ def make_handler(context_factory: Callable[[str, str | None, str | None], Compan
             return json.loads(self.rfile.read(length).decode("utf-8"))
 
         def do_GET(self) -> None:
+            # 静态页面本身放行（前端有 token 输入框 / URL 参数直达）：
+            # 只有 /v1/* API 和 /health 强制鉴权。
+            if self.path == "/" or self.path.startswith("/index.html"):
+                self._serve_static()
+                return
             if not self._auth():
                 self._json(401, {"error": "unauthorized"})
                 return
@@ -196,9 +215,16 @@ def make_handler(context_factory: Callable[[str, str | None, str | None], Compan
             route, params, _ = parsed
             body = self._read_body()
             if route == "turns":
-                ctx = context_factory(
-                    body.get("server", "numen-ab"), body.get("companion"),
-                    body.get("persona"))
+                try:
+                    ctx = context_factory(
+                        body.get("server", "numen-ab"), body.get("companion"),
+                        body.get("persona"))
+                except (ValueError, RuntimeError) as exc:
+                    # 同伴不存在/dormant/名字歧义 → 友好错误，不 500 空回复
+                    self._json(400, {"error": str(exc),
+                                     "hint": "若同伴刚死亡，等待它复活（live）后再操作；"
+                                             "或用 list_companions 确认名字"})
+                    return
                 if ctx:
                     self._json(200, ctx.run_turn(str(body.get("message", ""))))
             elif route == "recover":
@@ -221,7 +247,8 @@ def make_handler(context_factory: Callable[[str, str | None, str | None], Compan
                 return None
 
         def _parse_path(self) -> tuple[str, dict[str, str], CompanionContext] | None:
-            if self.path == "/":
+            # 根路径允许带查询参数（?token=xxx 直达），按不带参数的根处理
+            if self.path.split("?", 1)[0] == "/":
                 return ("root", {}, None)
             match = re.fullmatch(r"/v1/([a-z]+)(?:\?([^#]*))?", self.path)
             if not match:
@@ -289,10 +316,14 @@ def main() -> None:
     server = BrainServer(host=args.host, port=args.port, token=args.token,
                          factory=factory, static_dir=Path(args.static_dir))
     server.start()
+    url = f"http://{args.host}:{server.bound_port()}"
+    direct = f"{url}/?token={args.token}" if args.token else url
     print(json.dumps({
         "status": "up",
-        "url": f"http://{args.host}:{server.bound_port()}",
+        "url": url,
+        "direct_url": direct,
         "auth": bool(args.token),
+        "hint": "浏览器直接打开 direct_url 即可（已带 token，无需输入）",
     }, ensure_ascii=False, indent=2))
     try:
         threading.Event().wait()
