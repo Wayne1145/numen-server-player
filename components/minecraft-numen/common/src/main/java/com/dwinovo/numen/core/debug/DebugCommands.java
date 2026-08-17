@@ -72,7 +72,12 @@ public final class DebugCommands {
                 .then(Commands.literal("cancel")
                         .then(Commands.argument("name", StringArgumentType.word())
                                 .suggests(DebugCommands::suggestCompanions)
-                                .executes(DebugCommands::cancel))));
+                                .executes(DebugCommands::cancel)))
+                .then(Commands.literal("say")
+                        .then(Commands.argument("name", StringArgumentType.word())
+                                .suggests(DebugCommands::suggestCompanions)
+                                .then(Commands.argument("message", StringArgumentType.greedyString())
+                                        .executes(DebugCommands::sayToAI)))));
     }
 
     // ==================== 补全 ====================
@@ -84,7 +89,9 @@ public final class DebugCommands {
         ServerPlayer caller = ctx.getSource().getPlayer();
         if (caller != null) {
             for (ServerPlayer p : caller.level().getServer().getPlayerList().getPlayers()) {
-                if (p instanceof NumenPlayer np && np.isOwnedByPlayer(caller.getUUID())) {
+                if (p instanceof NumenPlayer np
+                        && (np.isOwnedByPlayer(caller.getUUID())
+                            || np.getOwnerUuid().equals(com.dwinovo.numen.entity.ServerOwner.ID))) {
                     builder.suggest(p.getName().getString());
                 }
             }
@@ -216,6 +223,41 @@ public final class DebugCommands {
         return 1;
     }
 
+    /**
+     * /numen say <name> <message> —— 把玩家对某同伴说的话写入服务器事件缓冲
+     * (RecentEventsTool.BUFFER)，与真实聊天事件共用同一通路。外部大脑(active agent
+     * / WebUI)轮询 get_recent_events 时会看到这条 chat 事件并触发 AI 响应/执行。
+     * 这是对 Mohist 混合端 Bukkit 聊天监听不可用(org.bukkit.EventExecutor classloader
+     * 隔离)时的可靠替代：走 Forge 命令系统，100% 生效。
+     */
+    private static int sayToAI(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        String name = StringArgumentType.getString(ctx, "name");
+        String message = StringArgumentType.getString(ctx, "message");
+        ServerPlayer owner = ctx.getSource().getPlayerOrException();
+        // 找一个匹配的同伴(玩家所有或服务器所有)
+        NumenPlayer target = null;
+        for (ServerPlayer p : owner.level().getServer().getPlayerList().getPlayers()) {
+            if (p instanceof NumenPlayer np
+                    && (np.isOwnedByPlayer(owner.getUUID())
+                        || np.getOwnerUuid().equals(com.dwinovo.numen.entity.ServerOwner.ID))
+                    && np.getName().getString().equals(name)) {
+                target = np;
+                break;
+            }
+        }
+        if (target == null) {
+            ctx.getSource().sendFailure(Component.literal("没有名为 '" + name + "' 的同伴"));
+            return 0;
+        }
+        // 写入事件缓冲：source 用调用者名字，detail 用 "@<同伴名> " + 消息原文，
+        // 保证 active agent 的 mention_words(如 @1 / 同伴名) 一定能命中触发。
+        com.dwinovo.numen.core.tools.RecentEventsTool.BUFFER.add(
+                "chat", owner.getName().getString(), "@" + name + " " + message);
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "已把消息发给 AI 大脑: " + message), false);
+        return 1;
+    }
+
     private static int cancel(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         NumenPlayer companion = requireCompanion(ctx);
         if (companion == null) {
@@ -229,13 +271,15 @@ public final class DebugCommands {
 
     // ==================== 同伴定位 ====================
 
-    /** 按名字找调用者拥有的同伴;找不到发失败提示并返回 null。 */
+    /** 按名字找同伴(玩家所有或服务器所有均可);找不到发失败提示并返回 null。 */
     private static NumenPlayer requireCompanion(CommandContext<CommandSourceStack> ctx)
             throws CommandSyntaxException {
         String name = StringArgumentType.getString(ctx, "name");
         ServerPlayer owner = ctx.getSource().getPlayerOrException();
         for (ServerPlayer p : owner.level().getServer().getPlayerList().getPlayers()) {
-            if (p instanceof NumenPlayer np && np.isOwnedByPlayer(owner.getUUID())
+            if (p instanceof NumenPlayer np
+                    && (np.isOwnedByPlayer(owner.getUUID())
+                        || np.getOwnerUuid().equals(com.dwinovo.numen.entity.ServerOwner.ID))
                     && np.getName().getString().equals(name)) {
                 return np;
             }

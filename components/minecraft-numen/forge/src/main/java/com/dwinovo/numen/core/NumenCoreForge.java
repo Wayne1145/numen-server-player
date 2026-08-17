@@ -82,11 +82,13 @@ public class NumenCoreForge {
     private static void registerBukkitChatListener() {
         try {
             Class<?> asyncChat = Class.forName("org.bukkit.event.player.AsyncPlayerChatEvent");
+            Constants.LOG.info("[numen-core] BUKKIT-PATH-1: found AsyncPlayerChatEvent={}", asyncChat);
             Class<?> listenerIface = Class.forName("org.bukkit.event.Listener");
             Class<?> executorIface = Class.forName("org.bukkit.event.EventExecutor");
             Class<?> priorityEnum = Class.forName("org.bukkit.event.EventPriority");
             Class<?> bukkit = Class.forName("org.bukkit.Bukkit");
             Class<?> pluginClass = Class.forName("org.bukkit.plugin.Plugin");
+            Constants.LOG.info("[numen-core] BUKKIT-PATH: all bukkit classes resolved");
 
             // Listener 占位实例（executor 才是真正处理逻辑）
             Object placeholder = java.lang.reflect.Proxy.newProxyInstance(
@@ -108,8 +110,10 @@ public class NumenCoreForge {
                                 String message = String.valueOf(
                                         asyncChat.getMethod("getMessage").invoke(evt));
                                 com.dwinovo.numen.core.tools.RecentEventsTool.BUFFER.add("chat", name, message);
-                            } catch (Throwable ignored) {
-                                // 取字段失败就不记这条，别让聊天监听影响游戏
+                                Constants.LOG.info("[numen-core] BUKKIT-CHAT-EVENT captured: {} > {}",
+                                        name, message);
+                            } catch (Throwable t2) {
+                                Constants.LOG.warn("[numen-core] BUKKIT-CHAT handler error: {}", t2.toString());
                             }
                         }
                         return null;
@@ -122,6 +126,9 @@ public class NumenCoreForge {
             if (plugins instanceof Object[] arr && arr.length > 0) {
                 plugin = arr[0];
             }
+            Constants.LOG.info("[numen-core] BUKKIT-PATH: pluginManager={}, plugins={}, picked={}",
+                    pm.getClass().getSimpleName(), plugins == null ? "null" : String.valueOf(java.lang.reflect.Array.getLength(plugins)),
+                    plugin == null ? "none" : plugin.getClass().getSimpleName());
             if (plugin == null) {
                 Constants.LOG.info("[numen-core] Bukkit API present but no plugin to register chat listener — "
                         + "chat events may be missed on this hybrid server");
@@ -134,10 +141,12 @@ public class NumenCoreForge {
             Constants.LOG.info("[numen-core] registered Bukkit AsyncPlayerChatEvent listener (hybrid server)");
         } catch (ClassNotFoundException e) {
             // 纯 Forge 无 Bukkit —— 正常跳过
-            Constants.LOG.info("[numen-core] no Bukkit API (pure Forge) — chat via ServerChatEvent only");
+            Constants.LOG.info("[numen-core] no Bukkit API (pure Forge) — chat via ServerChatEvent only; cnfe=" + e);
         } catch (Throwable t) {
-            Constants.LOG.warn("[numen-core] Bukkit chat listener registration failed: {}",
-                    t.toString());
+            Constants.LOG.warn("[numen-core] Bukkit chat listener registration failed: {}", t.toString(), t);
+            for (StackTraceElement el : t.getStackTrace()) {
+                Constants.LOG.warn("[numen-core]   at {}", el.toString());
+            }
         }
     }
 
