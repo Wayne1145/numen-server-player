@@ -6,10 +6,15 @@
 
 ```bash
 cd ~/.hermes/workspace/numen-ab-lab
-# 先填环境变量（MCP URL/token、DeepSeek key）
+# 先填环境变量（MCP URL/token、模型端点二选一）
 export NUMEN_MCP_URL=http://127.0.0.1:25585/mcp        # 隔离服
 export NUMEN_MCP_TOKEN=<token>
+
+# 模式 A：DeepSeek 官方（推荐用于云端推理）
 export NUMEN_DEEPSEEK_KEY=<key>
+# 模式 B：LM Studio 本地模型（OpenAI 兼容端点；无需 key）
+# export NUMEN_LLM_URL=http://127.0.0.1:1234/v1/chat/completions
+# export NUMEN_LLM_MODEL=qwen2.5-9b-instruct
 
 # 跑一轮（不常驻）
 python3 active_agent_cli.py --once --companions ABBrain --mention-words ABBrain,八千代
@@ -20,7 +25,8 @@ python3 active_agent_cli.py --once --companions ABBrain --mention-words ABBrain,
 ```bash
 cd ~/.hermes/workspace/numen-ab-lab/deploy
 cp .env.active-agent.example ../.env.active-agent
-# 编辑 ../.env.active-agent：填正式服 MCP token（25567）和 DeepSeek key
+# 编辑 ../.env.active-agent：填正式服 MCP token（25567）
+# 并选择模型端点：DeepSeek key（A）或本地 LM Studio URL+模型名（B）
 
 # 安装服务
 mkdir -p ~/.config/systemd/user
@@ -29,6 +35,16 @@ systemctl --user daemon-reload
 systemctl --user enable --now numen-active-agent.service
 systemctl --user status numen-active-agent.service
 ```
+
+## LM Studio 本地模型注意事项
+
+- agent 大脑默认使用 OpenAI 兼容的 `/v1/chat/completions`；LM Studio 的
+  Developer 面板开启本地服务器后即可用 `http://127.0.0.1:1234/v1`。
+- 本地小模型（如 7B/9B）**能力上限决定任务复杂度**：简单移动、采木、
+  拾取、按坐标导航可胜任；长链任务（挖矿→烧炼→合成→入箱）需要更强
+  模型或分步下达。
+- 选模型时优先支持严格 JSON / tool-calling 的指令模型；`ensure_llm_ready`
+  只对 DeepSeek 官方端点强制要 key，本地端点无需 key。
 
 日志：
 

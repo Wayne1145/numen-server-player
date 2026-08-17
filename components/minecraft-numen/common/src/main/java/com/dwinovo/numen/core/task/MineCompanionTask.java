@@ -134,6 +134,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** Game time by which the in-flight scan must finish or be abandoned. */
     private long scanDeadline;
 
+    /** 终态诊断:实际挖掉的矿点坐标(有界,最近 16 个),供外部模型核对
+     *  "gathered > 0" 的来源,而不是把 running/idle 当成完成。 */
+    private final java.util.ArrayDeque<BlockPos> minedPositions = new java.util.ArrayDeque<>();
+    /** 终态诊断:最后一次放弃/拉黑目标的简要原因,让外部模型知道"为什么没挖到"。 */
+    private String lastBlockedReason = "";
+
     // Progressive dig (blocks break tick-by-tick at legitimate player speed, not
     // instabreak) — shared with the path executor so all breaking reads the same.
     private final BlockDigger digger;
@@ -252,6 +258,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                                 "[numen-task] mine stance dud at feet={} — arrived per"
                                         + " goal, nothing reachable (LOS/reach)",
                                 player.blockPosition().toShortString());
+                        lastBlockedReason = "arrived at a stance but no ore in reach/LOS"
+                                + " (feet=" + player.blockPosition().toShortString() + ")";
                         blacklistNearest();
                     }
                     return TaskState.RUNNING;   // a reachable shaft is handled next tick
@@ -260,6 +268,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     com.dwinovo.numen.Constants.LOG.info(
                             "[numen-task] mine nav failed ({}): {}",
                             nav.failType(), nav.failReason());
+                    lastBlockedReason = "nav failed: " + nav.failType() + " — " + nav.failReason();
                     blacklistNearest();
                     stopNav();
                     return TaskState.RUNNING;
@@ -423,11 +432,36 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     /**
      * The "shaft" test: a known target in the body's OWN feet column (x/z match),
-     * at or above feet, still solid, and reachable (within reach distance AND with
-     * a clear sight line). Mined in place, no pathing. The A* stance goal is what
-     * gets the body INTO the column; this only fires once it's there. No
+     * still solid, and physically reachable (within reach distance AND with a
+     * clear sight line). Mined in place, no pathing. The A* stance goal is what
+     * gets the body INTO the column; this only fires once it's there.
+     *
+     * <p>The reachable window is deliberately vertical on BOTH sides of the feet:
+     * an ore the body stands ON TOP of (one or two cells below the feet, e.g. an
+     * exposed surface vein) must be minable by looking down — excluding it made
+     * the body arrive above the ore, declare the stance a dud, blacklist the ore
+     * and walk off without mining it. Blocks deeper than the 4.5-block reach are
+     * rejected anyway by {@link #withinReach}, so no unchecked vertical digging is
+     * introduced here (a really deep vein still needs the pathing stance to open a
+     * shaft and is handled by the composite ore-field goal). No
      * reach-from-the-side shortcut.
      */
+    /**
+     * Same-column reach window for in-place shaft mining. {@code true} when the
+     * ore shares the body's x/z column and sits within the vertical reach of a
+     * standing body: same level, one cell up, one or two cells DOWN (the body is
+     * standing on top of the vein). Anything deeper must be approached by the
+     * composite ore-field goal, never dug blindly.
+     *
+     * <p>Pure geometry — extracted so the fix is unit-testable without booting
+     * Minecraft (regression: ore directly under the feet was previously skipped,
+     * so the body stood on the vein and walked off without mining it).
+     */
+    static boolean sameColumnReachableWindow(BlockPos feet, BlockPos ore) {
+        return ore.getX() == feet.getX() && ore.getZ() == feet.getZ()
+                && ore.getY() >= feet.getY() - 2;
+    }
+
     private BlockPos reachableTarget() {
         if (!player.onGround()) return null;
         Level level = player.level();
@@ -436,8 +470,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
         for (BlockPos ore : knownOres) {
-            if (ore.getX() != feet.getX() || ore.getZ() != feet.getZ()) continue;   // same column
-            if (ore.getY() < feet.getY()) continue;                                  // at or above feet
+            if (!sameColumnReachableWindow(feet, ore)) continue;   // same column, ±(feet+1..feet-2)
             if (level.getBlockState(ore).isAir()) continue;
             if (!withinReach(ore) || !hasLineOfSight(eyes, ore)) continue;           // reachable
             double d = ore.distSqr(feet.above());
@@ -474,6 +507,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         switch (digger.digStep(pos)) {
             case BROKE_TARGET -> {
                 knownOres.remove(pos);
+                minedPositions.addLast(pos.immutable());
+                if (minedPositions.size() > 16) minedPositions.removeFirst();
                 anticipatedDrops.put(pos.immutable(),
                         player.level().getGameTime() + DROP_LOITER_TICKS);
                 clearNoShot();
@@ -711,6 +746,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("target", r.label);
         data.put("requested", r.count);
         data.put("gathered", r.getMined());
+        // 终态诊断:实际挖掉的目标矿点(最多 16 个)与最后的阻塞原因。
+        // 外部模型必须看到 gathered 的真实来源,以及"0 收集"时为什么停。
+        data.put("mined_positions", minedPositions.stream()
+                .map(p -> p.getX() + "," + p.getY() + "," + p.getZ())
+                .toList());
+        data.put("blocked_reason", lastBlockedReason);
         return data;
     }
 
