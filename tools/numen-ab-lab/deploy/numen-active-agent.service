@@ -5,7 +5,9 @@ After=network.target
 [Service]
 Type=simple
 EnvironmentFile=%h/.hermes/workspace/numen-ab-lab/.env.active-agent
-ExecStart=%h/.hermes/workspace/numen-ab-lab/active_agent_cli.py --server-id numen-ab --poll 15 --cooldown 120
+# --mention-words "@1" 点名语法：只有聊天里出现 @1 才触发，
+# 避免裸名字 "1" 子串匹配误伤（任何带数字1的聊天都会触发）。
+ExecStart=%h/.hermes/workspace/numen-ab-lab/active_agent_cli.py --server-id numen-ab --poll 15 --cooldown 120 --mention-words @1
 WorkingDirectory=%h/.hermes/workspace/numen-ab-lab
 Restart=on-failure
 RestartSec=10

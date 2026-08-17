@@ -109,8 +109,11 @@ class ActiveAgent:
         self.survival_policy = survival_policy or SurvivalPolicy()
         self.trigger_policy_factory = trigger_policy_factory or TriggerPolicy
         self.message_template = message_template or (
-            "你刚刚收到了上面的服务器事件。如果玩家提到你或需要回应，请简短自然地回应；"
-            "如果是你的死亡，简单说明情况。不要移动，不要做多余动作。")
+            "你刚刚收到了上面的服务器事件。这是玩家在游戏聊天里点你的名（@名字）。\n"
+            "如果玩家给了具体任务（移动/挖掘/合成/放置/调查等），请按正常回合执行它——"
+            "调用工具直到完成或安全地说明阻塞；如果是闲聊或问候，简短自然地回应即可。\n"
+            "如果是你的死亡事件，简单说明情况，先恢复生存状态。\n"
+            "规则：玩家点名给任务 → 执行；无任务纯聊天 → 回话。不要擅自做玩家没要求的大范围破坏。")
         self._last_turn: dict[str, float] = {}
         self._last_survival_check: dict[str, float] = {}
 
