@@ -78,7 +78,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private static final int SCAN_Y_THRESHOLD = 10;
     /** 已凑够但全在层外时,最远还愿意扫出去的 chunk 环半径。 */
     private static final int SCAN_MAX_CHUNK_RADIUS = 32;
-    private static final double REACH_SQR = 4.5 * 4.5;
+    /** 挖掘锁定中,目标短暂超出交互距离(位置/地形微动)的容忍 tick 数。
+     *  超过才放弃当前目标——避免"快挖完却换目标、永远挖不下来"。 */
+    private static final int MAX_DIG_MISS_TICKS = 12;
     private static final double MINE_SPEED = 1.0;
     /** Give up branch-mining after this many ticks with no ore found (~30 s). */
     private static final int MAX_BRANCH_TICKS = 600;
@@ -122,6 +124,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     private boolean navIsBranch;
     private BlockPos branchPoint;
+    /** 挖掘锁定时目标短暂超出交互距离的连续 tick 计数。 */
+    private int digMissTicks;
     private int branchY;
     private int rescanTimer;
     private int branchTicks;
@@ -204,11 +208,26 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
         // 0) Continue an in-progress dig, locked onto its block (no re-selection)
         //    until it breaks or drifts out of reach.
+        // 锁定逻辑:目标只要还没挖掉(非 air)就继续挖到底;交互距离用"到方块
+        // 表面"的原版语义,而不是中心距离(中心距离多 0.5~0.87 格,挖掘中位置
+        // 微动会被误判"够不着"→ cancel 清空进度 → 换目标重挖 → 永远挖不完)。
+        // 短暂超出 reach 时给 MAX_DIG_MISS_TICKS 容忍窗口,连续超时才放弃,
+        // 保证"挖一个就挖完一个"。
         BlockPos digging = digger.current();
         if (digging != null) {
-            if (level.getBlockState(digging).isAir() || !withinReach(digging)) {
+            if (level.getBlockState(digging).isAir()) {
                 digger.cancel();
+                digMissTicks = 0;
+            } else if (withinReach(digging)) {
+                digMissTicks = 0;
+                mineProgress(digging);
+                return TaskState.RUNNING;
+            } else if (++digMissTicks >= MAX_DIG_MISS_TICKS) {
+                digger.cancel();
+                digMissTicks = 0;
             } else {
+                // 仍在容忍窗口内:保持锁定,继续尝试(返回 NO_SHOT 时任务自身的
+                // blacklist 逻辑兜底,不会无限空转)。
                 mineProgress(digging);
                 return TaskState.RUNNING;
             }
@@ -483,12 +502,22 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     }
 
     /** Clear sight line from the eyes to the target block's centre (nothing solid
-     *  blocks it but the target itself). */
+     *  blocks it but the target itself). 被"另一个挖掘目标"挡住不算障碍——
+     *  挖树时视线穿过下方原木、挖矿时穿过前方矿脉,都是可逐步逼近的,
+     *  否则树冠/矿脉深处的目标永远"不可达",任务只能挖到最外面一块。 */
     private boolean hasLineOfSight(Vec3 eyes, BlockPos target) {
         BlockHitResult hit = player.level().clip(new ClipContext(
                 eyes, Vec3.atCenterOf(target),
                 ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
-        return hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target);
+        if (hit.getType() != HitResult.Type.BLOCK) {
+            return true;                       // 无遮挡(射线穿过空气)
+        }
+        if (hit.getBlockPos().equals(target)) {
+            return true;                       // 直接命中目标
+        }
+        BlockPos blocked = hit.getBlockPos().immutable();
+        return knownOres.contains(blocked)     // 挡着的是另一块目标——可挖开路
+                || r.targets.contains(player.level().getBlockState(blocked).getBlock());
     }
 
     // ---- mining (progressive, tick-by-tick like a real player) ----
@@ -716,8 +745,34 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return TaskState.FAILED;
     }
 
+    /** 目标是否在交互距离内。用"到方块表面"的最近距离(MC 原版语义:
+     *  玩家能点到方块面即算可达),而不是到方块中心的距离——中心距离
+     *  比表面距离多 0.5~0.87 格,站在边缘挖高处方块时会被误判"够不着",
+     *  导致挖掘被取消、换目标重挖。方块中心点通过 {@code Mth.clamp}
+     *  投影到方块 AABB 上取最近表面点。 */
     private boolean withinReach(BlockPos pos) {
-        return player.distanceToSqr(Vec3.atCenterOf(pos)) <= REACH_SQR;
+        double reach = com.dwinovo.numen.core.pathing.moves.MovementHelper
+                .blockReachDistance(player);
+        Vec3 center = Vec3.atCenterOf(pos);
+        double px = net.minecraft.util.Mth.clamp(player.getX(), center.x - 0.5, center.x + 0.5);
+        double py = net.minecraft.util.Mth.clamp(player.getEyeY(), center.y - 0.5, center.y + 0.5);
+        double pz = net.minecraft.util.Mth.clamp(player.getZ(), center.z - 0.5, center.z + 0.5);
+        double dx = player.getX() - px;
+        double dy = player.getEyeY() - py;
+        double dz = player.getZ() - pz;
+        return dx * dx + dy * dy + dz * dz <= reach * reach;
+    }
+
+    /** 纯几何:玩家脚/眼位置到目标方块的最近表面距离平方(供单测,不经 MC 实体)。
+     *  语义与 {@link #withinReach} 一致:点到 AABB 的最近距离,而不是中心距离。 */
+    static double surfaceDistSqr(double px, double py, double pz,
+                                 int bx, int by, int bz) {
+        double cx = bx + 0.5, cy = by + 0.5, cz = bz + 0.5;
+        double qx = net.minecraft.util.Mth.clamp(px, cx - 0.5, cx + 0.5);
+        double qy = net.minecraft.util.Mth.clamp(py, cy - 0.5, cy + 0.5);
+        double qz = net.minecraft.util.Mth.clamp(pz, cz - 0.5, cz + 0.5);
+        double dx = px - qx, dy = py - qy, dz = pz - qz;
+        return dx * dx + dy * dy + dz * dz;
     }
 
     /** Stop the nav AND clear the branch-mode flag (extends the base's nav release). */
