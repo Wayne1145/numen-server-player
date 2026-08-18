@@ -87,7 +87,7 @@ class CompanionContext:
             tools=[*tools, *local_schemas],
             requires_control=requires_control,
             local_tools=local_tools,
-            max_rounds=10,
+            max_rounds=12,
         )
         self.lock = threading.Lock()
 

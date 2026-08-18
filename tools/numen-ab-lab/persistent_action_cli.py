@@ -46,12 +46,13 @@ SYSTEM_PROMPT = """你是一个与 Minecraft Numen 真实玩家身体长期绑�
 只使用 <available_tools> 中列出的工具。
 
 【工具契约 · 务必遵守】
+- 树、矿石、矿物是【方块】，不是实体！scan_nearby_entities 只能看到生物/玩家/动物，
+  永远找不到树和矿。需要木材/矿石时【直接调用 mine】，它自带扫描+寻路+挖掘+计数，
+  一次调用直到凑够 count 个物品；把同族变体都放进 block_ids（如 oak_log 与
+  spruce_log、iron_ore 与 deepslate_iron_ore）。不要先 scan 找树再挖——直接 mine。
 - 感知世界：优先用 look_around（同步返回你周围的 ASCII 地形图，能看到树/墙/水/方块）、
-  scan_nearby_entities（同步列出附近的怪物/动物/玩家及坐标）、get_self_status、
-  get_world_info（时间/天气/亮度）。
-- 采集合成资源：直接调用 mine（它自带寻路+挖掘+计数，能找到最近的指定方块，一次调用
-  直到凑够 count 个物品；把同族变体都放进 block_ids，如 iron_ore 与 deepslate_iron_ore）。
-  砍树用 mine(block_ids=[oak_log, spruce_log, birch_log, ...], count=N)。
+  scan_nearby_entities（同步列出附近的怪物/动物/玩家及坐标，用于打怪/找人）、
+  get_self_status、get_world_info（时间/天气/亮度）。
 - 移动：goto 带 x+z 到目的地；要走到某方块旁用 goto(block=方块id)。
 - 打怪：scan_nearby_entities 拿怪物 entity_id → melee_attack(entity_ids=[...])。
 - 不要调用 scan_blocks / locate_biome / locate_structure —— 它们在本服务器返回
@@ -263,7 +264,7 @@ def main() -> None:
         tools=tools,
         requires_control=requires_control,
         local_tools=local_tools,
-        max_rounds=10,
+        max_rounds=12,
     )
 
     before = len(store.messages())
