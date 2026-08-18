@@ -103,7 +103,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** How long a just-broken target's cell stays a walk-over goal (ticks) — the drop
      *  takes a moment to spawn, and without this window the body sprints for the next
      *  ore before the item pops and leaves it behind. */
-    private static final int DROP_LOITER_TICKS = 5;
+    // 原版 ItemEntity 默认有约 10 tick 拾取延迟。旧值 5 会在物品尚不可拾取时
+    // 就冲向下一块矿，实服出现“挖掉 11 块、gathered=0、掉落物散在矿洞里”。
+    private static final int DROP_LOITER_TICKS = 40;
 
     private final List<BlockPos> knownOres = new ArrayList<>();
     private final Set<BlockPos> blacklist = new HashSet<>();
@@ -237,7 +239,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
         // 1) Mine any target we can already reach + see from here (no pathing) —
         //    a tree gets mined from beside, never by digging under it.
-        BlockPos reachable = reachableTarget();
+        // 先捡上一块矿的掉落，再继续挖下一块；否则矿脉中总有新目标可挖，
+        // 掉落分支一直得不到执行机会。
+        BlockPos reachable = drops.isEmpty() ? reachableTarget() : null;
         if (reachable != null) {
             stopNav();
             // Keep the goal boxes visible while mining in place: the path executor is
@@ -349,10 +353,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return GoalCompiler.standOn(player.blockPosition());
         }
         CalculationContext ctx = ContextFactory.forExecution(player);
-        List<GoalCompiler.Stance> stances =
-                new ArrayList<>(knownOres.size());
-        for (BlockPos ore : knownOres) {
-            stances.add(coalesce(ctx, ore));
+        // 有待拾取物时，复合目标只保留掉落物，避免 A* 因下一块矿更近
+        // 而绕过刚生成的掉落。清空掉落后再恢复矿位目标。
+        List<GoalCompiler.Stance> stances = new ArrayList<>();
+        if (drops.isEmpty()) {
+            for (BlockPos ore : knownOres) {
+                stances.add(coalesce(ctx, ore));
+            }
         }
         return GoalCompiler.mineField(
                 stances, new ArrayList<>(drops));
@@ -434,19 +441,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         for (ItemEntity ie : level.getEntitiesOfClass(ItemEntity.class, box)) {
             if (!dropItems.contains(ie.getItem().getItem())) continue;
             BlockPos p = ie.blockPosition();
-            if (blacklist.contains(p) || nearKnownOre(p)) continue;
+            if (blacklist.contains(p)) continue;
             out.add(p);
         }
         for (BlockPos p : anticipatedDrops.keySet()) {
-            if (blacklist.contains(p) || nearKnownOre(p)) continue;
+            if (blacklist.contains(p)) continue;
             out.add(p);
         }
         return out;
-    }
-
-    /** 距任一已知矿位 3 格内(distSqr ≤ 9)——挖那颗矿自然会带身体过去。 */
-    private boolean nearKnownOre(BlockPos p) {
-        return knownOres.stream().anyMatch(ore -> ore.distSqr(p) <= 9);
     }
 
     /**

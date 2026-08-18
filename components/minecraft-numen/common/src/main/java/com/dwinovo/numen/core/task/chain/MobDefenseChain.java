@@ -1,6 +1,5 @@
 package com.dwinovo.numen.core.task.chain;
 
-import com.google.common.collect.Multimap;
 import com.dwinovo.numen.task.BodyLog;
 import com.dwinovo.numen.task.reflex.Reflex;
 import com.dwinovo.numen.entity.InputDriver;
@@ -15,11 +14,7 @@ import com.dwinovo.numen.core.task.survival.SurvivalDecisions;
 import com.dwinovo.numen.core.task.survival.SurvivalDecisions.ThreatResponse;
 import com.dwinovo.numen.entity.NumenPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.ai.attributes.AttributeModifier;
-import net.minecraft.world.entity.ai.attributes.Attribute;
-import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
@@ -245,23 +240,9 @@ public final class MobDefenseChain implements TaskChain, com.dwinovo.numen.task.
     private static boolean hasWeapon(NumenPlayer companion) {
         var inv = companion.getInventory();
         for (int i = 0; i < inv.getContainerSize(); i++) {
-            if (stackAttackBonus(inv.getItem(i)) > 0.0) return true;
+            if (ToolSelect.combatWeaponDamage(inv.getItem(i)) > 0.0) return true;
         }
         return false;
-    }
-
-    /** Flat main-hand attack-damage a stack grants (mirrors {@code ToolSelect.weaponDamage}). */
-    private static double stackAttackBonus(ItemStack stack) {
-        if (stack.isEmpty()) return 0.0;
-        // 1.20.1: attribute modifiers come from the item's per-slot Multimap, not a component.
-        Multimap<Attribute, AttributeModifier> mods = stack.getAttributeModifiers(EquipmentSlot.MAINHAND);
-        double sum = 0.0;
-        for (AttributeModifier m : mods.get(Attributes.ATTACK_DAMAGE)) {
-            if (m.getOperation() == AttributeModifier.Operation.ADDITION) {
-                sum += m.getAmount();
-            }
-        }
-        return sum;
     }
 
     private boolean inReach(NumenPlayer companion, LivingEntity threat) {

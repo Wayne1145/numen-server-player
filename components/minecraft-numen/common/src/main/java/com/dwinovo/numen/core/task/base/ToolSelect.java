@@ -8,6 +8,9 @@ import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.PickaxeItem;
+import net.minecraft.world.item.ShovelItem;
+import net.minecraft.world.item.HoeItem;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
@@ -58,7 +61,7 @@ public final class ToolSelect {
         double bestDmg = 0.0;
         for (int i = 0; i < inv.getContainerSize(); i++) {
             ItemStack s = inv.getItem(i);
-            double d = weaponDamage(s);
+            double d = combatWeaponDamage(s);
             if (d > bestDmg) {
                 bestDmg = d;
                 best = i;
@@ -73,8 +76,15 @@ public final class ToolSelect {
      * The flat main-hand attack damage an item grants. A block or food scores 0,
      * so it is never chosen over a real weapon.
      */
-    private static double weaponDamage(ItemStack stack) {
+    /** 战斗伤害分。镐、锹、锄属于生产工具，即使带攻击加成也不能被
+     * 自动防卫拿去消耗耐久；剑、斧及带原生攻击属性的模组武器仍兼容。 */
+    public static double combatWeaponDamage(ItemStack stack) {
         if (stack.isEmpty()) return 0.0;
+        if (stack.getItem() instanceof PickaxeItem
+                || stack.getItem() instanceof ShovelItem
+                || stack.getItem() instanceof HoeItem) {
+            return 0.0;
+        }
         // 1.20.1: attribute modifiers come from the item's per-slot Multimap, not a component.
         Multimap<Attribute, AttributeModifier> mods = stack.getAttributeModifiers(EquipmentSlot.MAINHAND);
         double sum = 0.0;

@@ -96,6 +96,19 @@ class ResilienceTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "boom"):
             client.call("goto", {"x": 1})
 
+    def test_reenabled_async_queries_are_visible_to_model(self):
+        live_tools = [
+            {"name": "scan_blocks", "description": "scan", "inputSchema": {"type": "object"}},
+            {"name": "locate_biome", "description": "biome", "inputSchema": {"type": "object"}},
+            {"name": "locate_structure", "description": "structure", "inputSchema": {"type": "object"}},
+        ]
+        visible, control = model_tools(live_tools)
+        self.assertEqual(
+            {"scan_blocks", "locate_biome", "locate_structure"},
+            {tool["name"] for tool in visible},
+        )
+        self.assertEqual({name: False for name in control}, control)
+
     def test_model_tools_rejects_duplicate_tool_names(self):
         live_tools = [
             {"name": "goto", "description": "a", "inputSchema": {"type": "object"}},

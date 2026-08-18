@@ -35,10 +35,26 @@ public final class ExternalTaskResultStore {
         String resultJson = result == null
                 ? "{\"success\":false,\"message\":\"no result produced\"}"
                 : result.toJson();
+        put(companionId, taskId, new TaskStatus(taskId, state, detail, resultJson));
+    }
+
+    /** 保存不占用身体车道的延迟查询结果（例如 scan_blocks）。这类查询没有
+     * TaskRecord，但外部 MCP 同样需要一个可轮询的 retained task_id。 */
+    public static void recordQuery(UUID companionId, String taskId, String toolName,
+                                   String resultJson) {
+        if (companionId == null || taskId == null || taskId.isBlank()) return;
+        ToolResult parsed = ToolResult.of(resultJson);
+        String state = parsed.ok() ? "done" : "failed";
+        String detail = (toolName == null || toolName.isBlank() ? "query" : toolName)
+                + (parsed.ok() ? ": query completed" : ": query failed");
+        put(companionId, taskId, new TaskStatus(taskId, state, detail, resultJson));
+    }
+
+    private static void put(UUID companionId, String taskId, TaskStatus status) {
         LinkedHashMap<String, TaskStatus> byTask =
                 RESULTS.computeIfAbsent(companionId, ignored -> new LinkedHashMap<>());
         byTask.remove(taskId);
-        byTask.put(taskId, new TaskStatus(taskId, state, detail, resultJson));
+        byTask.put(taskId, status);
         while (byTask.size() > MAX_PER_COMPANION) {
             String oldest = byTask.keySet().iterator().next();
             byTask.remove(oldest);

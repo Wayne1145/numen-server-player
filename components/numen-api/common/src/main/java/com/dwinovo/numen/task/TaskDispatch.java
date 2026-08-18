@@ -31,6 +31,18 @@ public final class TaskDispatch {
             reply.accept(TaskResult.fail(busyMessage(busy)).toJson());
             return;
         }
+        // 外部 MCP 没有客户端网络回调可接收同步队列的延迟结果。统一把外部
+        // world-action 升级为可轮询任务，终态进入 ExternalTaskResultStore。
+        if (record.isExternalCall()) {
+            record.markAsync();
+            CompanionTickDispatcher.queueFor(companion.getUUID()).enqueue(record);
+            reply.accept(TaskResult.ok(
+                    "已受理 " + record.describe() + "，后台执行；请用 task_status("
+                            + record.publicId() + ") 获取最终结果。",
+                    java.util.Map.of("task_id", record.publicId(),
+                            "task", record.getToolName(), "async", true)).toJson());
+            return;
+        }
         CompanionTickDispatcher.queueFor(companion.getUUID()).enqueue(record);
     }
 

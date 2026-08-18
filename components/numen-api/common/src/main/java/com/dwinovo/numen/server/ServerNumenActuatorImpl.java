@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -44,6 +46,8 @@ public final class ServerNumenActuatorImpl implements ServerNumenActuator {
     private volatile AuthTokens tokens = AuthTokens.empty();
     private final LeaseRegistry leases = new LeaseRegistry();
     private final AuditLog audit = new AuditLog();
+    /** 不占身体车道的延迟查询使用独立短 id，避免把内部 mcp UUID 暴露给模型。 */
+    private static final AtomicLong QUERY_IDS = new AtomicLong();
     private volatile RateLimiter principalLimiter = new RateLimiter(policy.maxCallsPerMinutePerPrincipal(), 60_000);
     private volatile RateLimiter companionLimiter = new RateLimiter(policy.maxCallsPerMinutePerCompanion(), 60_000);
 
@@ -274,14 +278,26 @@ public final class ServerNumenActuatorImpl implements ServerNumenActuator {
 
             String toolCallId = "mcp-" + UUID.randomUUID();
             String[] captured = new String[1];
-            Consumer<String> reply = json -> { if (captured[0] == null) captured[0] = json; };
+            String queryId = "q" + QUERY_IDS.incrementAndGet();
+            AtomicBoolean invokeReturned = new AtomicBoolean(false);
+            Consumer<String> reply = json -> {
+                if (!invokeReturned.get() && captured[0] == null) {
+                    captured[0] = json;
+                } else {
+                    // scan_blocks 等查询在后续 tick 才回调。保存真实结构化结果，
+                    // task_status(queryId) 可稳定取回，不再丢成 queued 空包。
+                    ExternalTaskResultStore.recordQuery(companionId, queryId, toolName, json);
+                }
+            };
             try {
                 tool.onServerCall(toolCallId, arguments == null ? new JsonObject() : arguments, self, reply);
             } catch (RuntimeException ex) {
                 return fail(principal, companionId, toolName, leaseId, t0, "tool_error", "tool rejected the call: " + ex.getMessage());
             }
+            invokeReturned.set(true);
             ToolResult tr = captured[0] == null
-                    ? ToolResult.of("{\"success\":true,\"message\":\"action queued (sync task) — perceive to confirm\"}")
+                    ? ToolResult.of("{\"success\":true,\"message\":\"查询已受理，后台执行中；请用 task_status 轮询最终结果。\",\"data\":{\"task_id\":\""
+                            + queryId + "\",\"task\":\"" + toolName + "\",\"async\":true}}")
                     : ToolResult.of(captured[0]);
             audit.record(rec(principal.id(), "actuator", companionId, toolName, tr.taskId(), leaseId,
                     System.currentTimeMillis() - t0, tr.ok(), tr.ok() ? "ok" : "tool_fail"));

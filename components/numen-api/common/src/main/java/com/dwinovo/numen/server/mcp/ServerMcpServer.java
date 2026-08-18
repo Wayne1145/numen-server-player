@@ -64,23 +64,23 @@ public final class ServerMcpServer {
             "list_companions", "create_companion", "delete_companion",
             "acquire_control", "release_control", "task_status", "task_stop");
 
-    private static final String INSTRUCTIONS = """\
-            Numen companions are player-like characters in a live Minecraft server. Through this MCP \
-            server you take control of a companion's body and play as it — perceive, move, mine, build, \
-            craft, fight. Loop: list_companions (create_companion / delete_companion to manage); \
-            acquire_control <companion> to take the single write lease (returns lease_id); then call \
-            action tools with {companion, lease_id, …}; action tools return a task_id — poll \
-            task_status {companion, task_id} until done/failed/timeout/stopped, then perceive to confirm; \
-            release_control when done. Read tools (get_self_status, scan_blocks, …) need no lease and run \
+    private static final String INSTRUCTIONS = """
+            Numen companions are player-like characters in a live Minecraft server. Through this MCP
+            server you take control of a companion's body and play as it — perceive, move, mine, build,
+            craft, fight. Loop: list_companions (create_companion / delete_companion to manage);
+            acquire_control <companion> to take the single write lease (returns lease_id); then call
+            action tools with {companion, lease_id, …}; action tools return a task_id — poll
+            task_status {companion, task_id} until done/failed/timeout/stopped, then perceive to confirm;
+            release_control when done. Read tools (get_self_status, scan_blocks, …) need no lease and run
             concurrently.
 
-            TASK SEMANTICS (mandatory): a task_id returned by an action is the ONLY handle to that \
-            background job. Query task_status with that task_id; the body is busy (one job at a time) \
-            while a task runs — dispatch while busy is refused with the running task's id. state "idle" \
-            means NO task is running: it is NOT a success signal and never proves an action finished. \
-            Only done/failed/timeout/stopped are terminal; failed results carry a reason and teach the \
-            next move. Never re-dispatch an identical action while a task with the same goal is running \
-            or queued — stop it first or wait.\
+            TASK SEMANTICS (mandatory): a task_id returned by an action is the ONLY handle to that
+            background job. Query task_status with that task_id; the body is busy (one job at a time)
+            while a task runs — dispatch while busy is refused with the running task's id. state "idle"
+            means NO task is running: it is NOT a success signal and never proves an action finished.
+            Only done/failed/timeout/stopped are terminal; failed results carry a reason and teach the
+            next move. Never re-dispatch an identical action while a task with the same goal is running
+            or queued — stop it first or wait.
             """;
 
     private final McpNetConfig cfg;
