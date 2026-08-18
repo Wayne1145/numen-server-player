@@ -50,6 +50,22 @@ public final class ExternalTaskResultStore {
         put(companionId, taskId, new TaskStatus(taskId, state, detail, resultJson));
     }
 
+    /**
+     * 在把 qN 返回客户端之前登记可见的 queued 状态。查询可能要后续 tick 才回调；
+     * 若不先登记，客户端紧接着轮询会得到 unknown task_id，形成真实竞态。
+     * {@link #recordQuery} 会用同一 taskId 原子覆盖该占位记录。
+     */
+    public static void registerQuery(UUID companionId, String taskId, String toolName) {
+        if (companionId == null || taskId == null || taskId.isBlank()) return;
+        LinkedHashMap<String, TaskStatus> byTask =
+                RESULTS.computeIfAbsent(companionId, ignored -> new LinkedHashMap<>());
+        // 晚到回调可能恰好先于本方法写入终态；注册不得把 done/failed 降级回 queued。
+        if (byTask.containsKey(taskId)) return;
+        String label = toolName == null || toolName.isBlank() ? "query" : toolName;
+        put(companionId, taskId,
+                new TaskStatus(taskId, "queued", label + ": query accepted", null));
+    }
+
     private static void put(UUID companionId, String taskId, TaskStatus status) {
         LinkedHashMap<String, TaskStatus> byTask =
                 RESULTS.computeIfAbsent(companionId, ignored -> new LinkedHashMap<>());

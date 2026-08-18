@@ -15,6 +15,7 @@ import com.dwinovo.numen.core.pathing.util.BlockHelper;
 import com.dwinovo.numen.core.scan.BlockScanner;
 import com.dwinovo.numen.core.scan.ScanExecutor;
 import com.dwinovo.numen.core.task.base.AbstractCompanionTask;
+import com.dwinovo.numen.core.task.base.NativeItemPickup;
 import com.dwinovo.numen.core.task.base.Precondition;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -100,6 +101,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      *  COLLIDER ray disagreement, a lip over the stance). Without this the dig could
      *  grind forever waiting for a shot that never comes. */
     private static final int MAX_NO_SHOT_TICKS = 20;
+    /** 同一小区域内连续复合寻路失败的上限。一次复合目标已包含当前全部候选；
+     *  旧逻辑每次只拉黑一个候选，成片封闭矿层会对最多 64 个近似等价目标逐个
+     *  重跑 A*，表现为原地空转数分钟。移动到新区域或真正挖掉方块会重置。 */
+    private static final int MAX_LOCAL_NAV_FAILURES = 6;
+    /** 走出该半径视为进入新区域，允许重新获得完整的寻路失败预算。 */
+    private static final double NAV_FAILURE_RESET_DISTANCE_SQR = 16.0;
     /** How long a just-broken target's cell stays a walk-over goal (ticks) — the drop
      *  takes a moment to spawn, and without this window the body sprints for the next
      *  ore before the item pops and leaves it behind. */
@@ -145,6 +152,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private final java.util.ArrayDeque<BlockPos> minedPositions = new java.util.ArrayDeque<>();
     /** 终态诊断:最后一次放弃/拉黑目标的简要原因,让外部模型知道"为什么没挖到"。 */
     private String lastBlockedReason = "";
+    /** 同一局部区域内、没有实际挖掘进展的连续寻路失败次数。 */
+    private int localNavFailures;
+    private BlockPos navFailureAnchor;
 
     // Progressive dig (blocks break tick-by-tick at legitimate player speed, not
     // instabreak) — shared with the path executor so all breaking reads the same.
@@ -294,6 +304,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     lastBlockedReason = "nav failed: " + nav.failType() + " — " + nav.failReason();
                     blacklistNearest();
                     stopNav();
+                    recordLocalNavFailure(player.blockPosition());
+                    if (shouldAbortLocalNavFailures(localNavFailures)) {
+                        fail("navigation made no progress after " + localNavFailures
+                                        + " attempts in the same area; " + lastBlockedReason
+                                        + "; gathered " + r.getMined() + "/" + r.count,
+                                FailureType.NO_PATH);
+                        return TaskState.FAILED;
+                    }
                     return TaskState.RUNNING;
                 }
             }
@@ -440,6 +458,11 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         List<BlockPos> out = new ArrayList<>();
         for (ItemEntity ie : level.getEntitiesOfClass(ItemEntity.class, box)) {
             if (!dropItems.contains(ie.getItem().getItem())) continue;
+            // 物品若已在原生近距范围内，先主动触发一次 playerTouch。服务端
+            // 假玩家站在坑沿时不一定产生客户端式碰撞回调；playerTouch 仍会
+            // 原生检查 pickupDelay、背包容量和事件，不是直接改背包。
+            NativeItemPickup.tryPickup(player, ie);
+            if (ie.isRemoved()) continue;
             BlockPos p = ie.blockPosition();
             if (blacklist.contains(p)) continue;
             out.add(p);
@@ -483,6 +506,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 && ore.getY() >= feet.getY() - 2;
     }
 
+    /**
+     * 直接挖掘候选只由真实交互距离与视线决定。目标可以在身体侧面；同柱窗口
+     *  仅是旧竖井优化的几何描述，不能作为所有直接挖掘的必要条件。
+     */
+    static boolean eligibleDirectTarget(boolean inReach, boolean hasLineOfSight) {
+        return inReach && hasLineOfSight;
+    }
+
     private BlockPos reachableTarget() {
         if (!player.onGround()) return null;
         Level level = player.level();
@@ -491,9 +522,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
         for (BlockPos ore : knownOres) {
-            if (!sameColumnReachableWindow(feet, ore)) continue;   // same column, ±(feet+1..feet-2)
             if (level.getBlockState(ore).isAir()) continue;
-            if (!withinReach(ore) || !hasLineOfSight(eyes, ore)) continue;           // reachable
+            boolean inReach = withinReach(ore);
+            boolean visible = inReach && hasLineOfSight(eyes, ore);
+            // 只要真实交互距离与视线都满足，就应当原地直接挖；不能再额外要求
+            // 目标与脚底同一 X/Z 柱。旧限制会跳过侧前方 1.33 格的工作台，
+            // 反而启动复合寻路去找 44 格外的同类目标。
+            if (!eligibleDirectTarget(inReach, visible)) continue;
             double d = ore.distSqr(feet.above());
             if (d < bestD) {
                 bestD = d;
@@ -542,6 +577,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 if (minedPositions.size() > 16) minedPositions.removeFirst();
                 anticipatedDrops.put(pos.immutable(),
                         player.level().getGameTime() + DROP_LOITER_TICKS);
+                resetLocalNavFailures();
                 clearNoShot();
             }
             case NO_SHOT -> {
@@ -717,6 +753,29 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                             p.toShortString(), feet.toShortString(), knownOres.size(),
                             blacklist.size());
                 });
+    }
+
+    /** 记录一次没有进展的寻路失败；离开原局部区域后从 1 重新计数。 */
+    private void recordLocalNavFailure(BlockPos feet) {
+        int next = nextLocalNavFailureCount(localNavFailures, navFailureAnchor, feet);
+        if (next == 1) navFailureAnchor = feet.immutable();
+        localNavFailures = next;
+    }
+
+    private void resetLocalNavFailures() {
+        navFailureAnchor = null;
+        localNavFailures = 0;
+    }
+
+    /** 纯函数测试钉桩：同一局部区域累计，走出 4 格半径即重置为第一次失败。 */
+    static int nextLocalNavFailureCount(int current, BlockPos anchor, BlockPos feet) {
+        return anchor == null || feet.distSqr(anchor) > NAV_FAILURE_RESET_DISTANCE_SQR
+                ? 1 : current + 1;
+    }
+
+    /** 纯函数测试钉桩：达到上限后必须终止，不再逐个撞完全部候选。 */
+    static boolean shouldAbortLocalNavFailures(int failures) {
+        return failures >= MAX_LOCAL_NAV_FAILURES;
     }
 
     /** Terminal "nothing gathered, no ore left to go for" failure, distinguishing a

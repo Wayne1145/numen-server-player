@@ -5,6 +5,7 @@ import com.dwinovo.numen.task.TaskState;
 import com.dwinovo.numen.entity.NumenPlayer;
 import com.dwinovo.numen.core.pathing.exec.PlayerNav;
 import com.dwinovo.numen.core.task.base.AbstractCompanionTask;
+import com.dwinovo.numen.core.task.base.NativeItemPickup;
 import com.dwinovo.numen.core.task.base.TargetSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
@@ -36,8 +37,6 @@ public final class CollectItemsTaskGoal extends AbstractCompanionTask<CollectIte
     private enum Phase { SCAN, APPROACH }
 
     private static final double WALK_SPEED = 1.0;
-    /** Close enough that vanilla auto-pickup should have absorbed the item (≈1.2 blocks). */
-    private static final double PICKUP_REACH_SQR = 1.5;
 
     private Phase phase = Phase.SCAN;
     private ItemEntity target;
@@ -79,6 +78,9 @@ public final class CollectItemsTaskGoal extends AbstractCompanionTask<CollectIte
     }
 
     private TaskState tickApproach() {
+        if (target != null && !target.isRemoved()) {
+            NativeItemPickup.tryPickup(player, target);
+        }
         if (target == null || target.isRemoved()) {
             // Absorbed (by us or otherwise) — count it if it was ours to get.
             if (target != null) {
@@ -117,7 +119,7 @@ public final class CollectItemsTaskGoal extends AbstractCompanionTask<CollectIte
     /** Reached = absorbed, or close enough that auto-pickup should have fired. */
     private boolean picked() {
         return target == null || target.isRemoved()
-                || player.distanceToSqr(target) <= PICKUP_REACH_SQR;
+                || NativeItemPickup.withinReach(player.distanceToSqr(target));
     }
 
     private ItemEntity nearestItem() {

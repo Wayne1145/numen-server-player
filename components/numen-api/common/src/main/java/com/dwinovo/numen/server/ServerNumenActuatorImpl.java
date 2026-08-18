@@ -295,6 +295,11 @@ public final class ServerNumenActuatorImpl implements ServerNumenActuator {
                 return fail(principal, companionId, toolName, leaseId, t0, "tool_error", "tool rejected the call: " + ex.getMessage());
             }
             invokeReturned.set(true);
+            if (captured[0] == null) {
+                // 先登记 qN，再把它返回客户端；否则立即轮询可能早于晚到回调，
+                // 被误报 unknown task_id。回调完成后 recordQuery 会覆盖 queued。
+                ExternalTaskResultStore.registerQuery(companionId, queryId, toolName);
+            }
             ToolResult tr = captured[0] == null
                     ? ToolResult.of("{\"success\":true,\"message\":\"查询已受理，后台执行中；请用 task_status 轮询最终结果。\",\"data\":{\"task_id\":\""
                             + queryId + "\",\"task\":\"" + toolName + "\",\"async\":true}}")
