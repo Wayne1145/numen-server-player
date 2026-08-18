@@ -197,6 +197,70 @@ class PersistentActionTurnTest(unittest.TestCase):
             self.assertEqual("goto", result["actions"][0]["tool"])
             self.assertEqual("load_skill", result["actions"][1]["tool"])
 
+    def test_repeated_same_tool_decision_is_blocked_to_break_loop(self):
+        # 回归：模型反复派发同一异步任务（同工具+同参数）时会陷入循环
+        # （execute_tool_exact 同步等待超时/轮次超限）。第二次相同决策应被
+        # 循环检测拦截，注入提示引导收敛，而不是再次 dispatch。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = BrainSessionStore(root / "sessions", "ab", "uuid-1")
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            mcp = FakeMcp([{"state": "done", "task_id": "t9", "result": {"success": True}}])
+            answers = iter([
+                '{"type":"tool","name":"goto","arguments":{"x":6.5,"y":null,"z":0.5}}',
+                # 第二次完全相同 → 应被拦截，注入提示
+                '{"type":"tool","name":"goto","arguments":{"x":6.5,"y":null,"z":0.5}}',
+                '{"type":"final","content":"已到达。"}',
+            ])
+
+            runtime = ActionBrainRuntime(
+                store=store, checkpoint=checkpoint, mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "goto", "parameters": {}}],
+                requires_control={"goto": True},
+                local_tools={},
+                sleep=lambda _: None,
+                max_rounds=8,
+            )
+            result = runtime.run_turn("向东走六格")
+
+            self.assertEqual("已到达。", result["final"])
+            goto_calls = [args for name, args in mcp.calls if name == "goto"]
+            self.assertEqual(1, len(goto_calls),
+                             "重复的相同工具调用应被循环检测拦截，只 dispatch 一次")
+            self.assertFalse(checkpoint.path.exists())
+
+    def test_different_args_same_tool_not_blocked(self):
+        # 同一工具但不同参数（不同目标）是合法调用，不应被循环检测误伤。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = BrainSessionStore(root / "sessions", "ab", "uuid-1")
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            mcp = FakeMcp([
+                {"state": "done", "task_id": "t9", "result": {"success": True}},
+                {"state": "done", "task_id": "t9", "result": {"success": True}},
+            ])
+            answers = iter([
+                '{"type":"tool","name":"goto","arguments":{"x":6.5,"y":null,"z":0.5}}',
+                '{"type":"tool","name":"goto","arguments":{"x":7.5,"y":null,"z":0.5}}',
+                '{"type":"final","content":"完成。"}',
+            ])
+
+            runtime = ActionBrainRuntime(
+                store=store, checkpoint=checkpoint, mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "goto", "parameters": {}}],
+                requires_control={"goto": True},
+                local_tools={},
+                sleep=lambda _: None,
+                max_rounds=8,
+            )
+            result = runtime.run_turn("走走")
+
+            self.assertEqual("完成。", result["final"])
+            goto_calls = [args for name, args in mcp.calls if name == "goto"]
+            self.assertEqual(2, len(goto_calls), "不同参数的两个 goto 都合法")
+
     def test_write_action_injects_client_action_id(self):
         mcp = FakeMcp([{"state": "done", "task_id": "t9", "result": {"success": True}}])
         execute_tool_exact(

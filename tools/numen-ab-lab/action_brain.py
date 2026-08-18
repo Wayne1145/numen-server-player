@@ -27,6 +27,26 @@ def compact_tool_outcome(name: str, outcome: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _same_decision(a: Any, b: Any) -> bool:
+    """比较两条 assistant 决策是否相同（同工具 + 同参数）。
+
+    用于检测模型陷入"反复派发同一异步任务"的循环：只有工具名和参数
+    序列化后完全一致才算重复，避免误伤"同一工具不同目标"的合法调用。
+    """
+    try:
+        if isinstance(a, str):
+            a = json.loads(a)
+        if isinstance(b, str):
+            b = json.loads(b)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    if a.get("type") != "tool" or b.get("type") != "tool":
+        return False
+    return a.get("name") == b.get("name") and a.get("arguments") == b.get("arguments")
+
+
 class RecoveryRequired(RuntimeError):
     """上次进程可能已经产生游戏副作用，禁止静默重放。"""
 
@@ -250,6 +270,30 @@ class ActionBrainRuntime:
                     transcript = [*transient, {"role": "assistant", "content": final}]
                     self._commit(turn_id, transcript)
                     return {"final": final, "actions": actions, "rounds": number}
+
+                # 循环检测：模型反复派发同一异步任务（同工具+同参数）时，
+                # 不重复执行，而是注入提示引导它用 task_status 查进度或收敛到
+                # final。否则会因 execute_tool_exact 同步等待超时/轮次超限而死循环。
+                if decision["type"] == "tool":
+                    prior_decisions = [
+                        m.get("content") for m in transient
+                        if m.get("role") == "assistant"
+                    ]
+                    dup_count = sum(
+                        1 for p in prior_decisions if _same_decision(p, decision)
+                    )
+                    if dup_count >= 1:
+                        correction.append({
+                            "role": "user",
+                            "content": (
+                                "注意：你刚刚重复派发了同一个工具且参数完全相同。"
+                                "如果它返回了 task_id，说明是异步任务，请用 "
+                                "task_status 查询其进度（别重复派发同一任务）；"
+                                "如果它已完成或无法完成，请直接返回 final 总结结果。"
+                                "不要再派发重复的工具调用。"
+                            ),
+                        })
+                        continue
 
                 name = decision["name"]
                 available = name in self.requires_control or name in self.local_tools
