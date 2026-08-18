@@ -154,6 +154,23 @@ class ExactTaskExecutionTest(unittest.TestCase):
                 timeout_seconds=0.01,
             )
 
+    def test_error_is_terminal_state(self):
+        # 回归：任务完成后服务端清理记录，task_status 返回 error("unknown task_id")。
+        # 此前轮询到 120s 超时，回合挂死；error 现在视为终态直接收束。
+        mcp = FakeMcp([{"state": "error", "task_id": "t9",
+                        "detail": "unknown task_id: t9", "result": None}])
+        outcome = execute_tool_exact(
+            mcp,
+            companion="ABBrain",
+            name="goto",
+            arguments={"x": 6.5, "y": None, "z": 0.5},
+            requires_control=True,
+            sleep=lambda _: None,
+            timeout_seconds=5,
+        )
+        self.assertEqual("t9", outcome["task_id"])
+        self.assertEqual("error", outcome["terminal"]["state"])
+
 
 class PersistentActionTurnTest(unittest.TestCase):
     def test_local_tool_runs_without_mcp_or_lease(self):

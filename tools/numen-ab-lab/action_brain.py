@@ -14,7 +14,7 @@ from typing import Any, Callable
 from brain_runner import parse_decision
 from persistent_brain import BrainSessionStore, fsync_dir
 
-TERMINAL_STATES = {"done", "failed", "timeout", "stopped"}
+TERMINAL_STATES = {"done", "failed", "timeout", "stopped", "error"}
 
 
 def compact_tool_outcome(name: str, outcome: dict[str, Any]) -> dict[str, Any]:
@@ -137,7 +137,7 @@ def _task_id(value: Any) -> str | None:
 def execute_tool_exact(mcp: Any, *, companion: str, name: str,
                        arguments: dict[str, Any], requires_control: bool,
                        sleep: Callable[[float], None] = time.sleep,
-                       timeout_seconds: float = 120.0,
+                       timeout_seconds: float = 300.0,
                        on_dispatched: Callable[[Any, str | None], None] | None = None,
                        client_action_id: str | None = None) -> dict[str, Any]:
     """短租约派发工具；异步任务只按原 task_id 等待明确终态。
@@ -425,7 +425,7 @@ class ActionBrainRuntime:
                 })
         raise RuntimeError(f"maximum rounds exceeded: {self.max_rounds}")
 
-    def _poll_existing_task(self, task_id: str, timeout_seconds: float = 120.0) -> dict[str, Any]:
+    def _poll_existing_task(self, task_id: str, timeout_seconds: float = 300.0) -> dict[str, Any]:
         samples: list[Any] = []
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:

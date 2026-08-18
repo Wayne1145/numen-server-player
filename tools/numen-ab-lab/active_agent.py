@@ -134,6 +134,24 @@ class ActiveAgent:
         trigger = self.trigger_policy_factory(companion)
         cursor_store = self._cursor_for(companion, ctx)
 
+        # 挂起的回合 checkpoint（上次因超时/中断未完成）：优先尝试自动恢复，
+        # 让长任务（mine/goto/build 等）在完成后能把结果接回来，而不是等到
+        # 玩家再次点名才处理。恢复是幂等的（poll 原 task_id）。
+        pending = getattr(getattr(ctx, "runtime", None), "checkpoint", None)
+        if pending is not None and pending.path.exists():
+            try:
+                result = ctx.recover_turn()
+                if result is not None:
+                    final = (result or {}).get("final") or ""
+                    if isinstance(final, str) and final.strip():
+                        self._send_reply(ctx, final)
+                    self._last_turn[companion] = now
+                    return result
+            except Exception:
+                # 任务还在跑（超时未完成）或 checkpoint 已坏：不打断，继续常规轮询。
+                # 恢复失败计数交给 _auto_turn 的 RecoveryRequired 路径处理。
+                pass
+
         events = ctx.list_recent_events(count=50)
         cursor = cursor_store.load()
         new_events: list[dict[str, Any]] = []
@@ -150,31 +168,48 @@ class ActiveAgent:
             return None
 
         result = None
+        consumed = False  # 本批事件已处理（触发执行 或 判定无关），应推进游标；cooldown 跳过不算
         triggered = bool(new_events) and any(trigger.should_trigger(e) for e in new_events)
-        if triggered:
-            if self._in_cooldown(companion, now):
-                # 冷却中：不触发也不推进游标，下次轮询重试，避免事件被错过。
-                return None
-            result = self._auto_turn(ctx, companion, new_events, now)
+        try:
+            if triggered:
+                if self._in_cooldown(companion, now):
+                    # 冷却中：不触发也不推进游标，下次轮询重试，避免事件被错过。
+                    return None
+                consumed = True
+                result = self._auto_turn(ctx, companion, new_events, now)
+            elif new_events:
+                # 有新事件但判定无关（不点名）：标记已消费，推进游标，
+                # 避免同一批无关事件每轮都被重看。
+                consumed = True
 
-        # 定期生存检查（独立于事件触发）。
-        last_check = self._last_survival_check.get(companion)
-        if last_check is None or (now - last_check) >= self.survival_interval:
-            self._last_survival_check[companion] = now
-            if result is None and not self._in_cooldown(companion, now):
+            # 定期生存检查（独立于事件触发）。
+            last_check = self._last_survival_check.get(companion)
+            if last_check is None or (now - last_check) >= self.survival_interval:
+                self._last_survival_check[companion] = now
+                if result is None and not self._in_cooldown(companion, now):
+                    try:
+                        status = ctx.get_self_status()
+                    except Exception:
+                        status = {}
+                    if self.survival_policy.needs_attention(status):
+                        consumed = True
+                        result = self._auto_turn(
+                            ctx, companion, [], now,
+                            message="你的生命值或饥饿度偏低，请处理生存状态"
+                                    "（进食/治疗等），并简短说明。不要移动。")
+        finally:
+            # 无论回合成功/失败都推进游标并清空收件箱：防止同一批事件在
+            # _auto_turn 抛异常（如恢复失败）后无限重放，造成"恢复失败→
+            # 清 checkpoint→再触发"死循环。事件已尝试处理过一次，即使失败
+            # 也标记消费；玩家重新点名会带来新事件。
+            # cooldown 跳过的轮次不推进（事件留给下次重试）。
+            if consumed and events:
+                cursor_store.save(fingerprint(events[0]))
+            if consumed:
                 try:
-                    status = ctx.get_self_status()
+                    ctx.inbox.clear()
                 except Exception:
-                    status = {}
-                if self.survival_policy.needs_attention(status):
-                    result = self._auto_turn(
-                        ctx, companion, [], now,
-                        message="你的生命值或饥饿度偏低，请处理生存状态"
-                                "（进食/治疗等），并简短说明。不要移动。")
-
-        # 游标推进到最新一条（已触发或已判定无关），避免历史事件无限重看。
-        if events:
-            cursor_store.save(fingerprint(events[0]))
+                    pass
         return result
 
     def _auto_turn(self, ctx: Any, companion: str,
@@ -226,31 +261,35 @@ class ActiveAgent:
         # 游戏里说出去。若 final 为空(纯工具回合、无文本回复)则不重复发。
         final = (result or {}).get("final") or ""
         if isinstance(final, str) and final.strip():
-            try:
-                # send_chat 是 SERVER_BODY_ACTION，需要控制 lease。
-                # 先 acquire(返回 lease_id) → send_chat → release。
-                lease = ctx.mcp.call("acquire_control", {"companion": ctx.companion})
-                lease_id = (lease or {}).get("lease_id") if isinstance(lease, dict) else None
-                try:
-                    ctx.mcp.call("send_chat", {
-                        "companion": ctx.companion,
-                        "lease_id": lease_id,
-                        "text": final.strip()[:300],
-                    })
-                finally:
-                    if lease_id:
-                        try:
-                            ctx.mcp.call("release_control", {
-                                "companion": ctx.companion, "lease_id": lease_id})
-                        except Exception:
-                            pass
-            except Exception as exc:
-                # 发不出回话不致命——AI 回合仍已执行完，仅提示。
-                import logging
-                logging.getLogger("active_agent").warning(
-                    "send_chat 回写游戏失败: %s", exc)
+            self._send_reply(ctx, final)
         self._last_turn[companion] = now
         return result
+
+    def _send_reply(self, ctx: Any, final: str) -> None:
+        """把文本发回游戏聊天栏（供 _auto_turn 与挂起回合恢复复用）。"""
+        try:
+            # send_chat 是 SERVER_BODY_ACTION，需要控制 lease。
+            # 先 acquire(返回 lease_id) → send_chat → release。
+            lease = ctx.mcp.call("acquire_control", {"companion": ctx.companion})
+            lease_id = (lease or {}).get("lease_id") if isinstance(lease, dict) else None
+            try:
+                ctx.mcp.call("send_chat", {
+                    "companion": ctx.companion,
+                    "lease_id": lease_id,
+                    "text": final.strip()[:300],
+                })
+            finally:
+                if lease_id:
+                    try:
+                        ctx.mcp.call("release_control", {
+                            "companion": ctx.companion, "lease_id": lease_id})
+                    except Exception:
+                        pass
+        except Exception as exc:
+            # 发不出回话不致命——AI 回合仍已执行完，仅提示。
+            import logging
+            logging.getLogger("active_agent").warning(
+                "send_chat 回写游戏失败: %s", exc)
 
     def run_forever(self, companions_provider: Callable[[], list[str]]) -> None:
         """常驻循环：轮询所有 live 同伴。"""

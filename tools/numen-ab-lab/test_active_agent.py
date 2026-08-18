@@ -108,7 +108,7 @@ class RecoveryContext(FakeContext):
 
 class _FakeCheckpoint:
     def __init__(self, ctx):
-        self.path = "/fake/checkpoint.json"
+        self.path = Path("/fake/checkpoint.json")
         self._ctx = ctx
 
     def clear(self):
@@ -247,6 +247,69 @@ class ActiveAgentTest(unittest.TestCase):
             result = agent.run_once("ABBrain")
             self.assertIsNotNone(result)
             self.assertIn("死亡", ctx.run_turns[0])
+
+    def test_run_turn_exception_still_advances_cursor(self):
+        # 回归：_auto_turn 抛异常（如恢复失败）后，cursor 必须推进，
+        # 否则同一批事件无限重放 → "恢复失败→清 checkpoint→再触发"死循环。
+        class ExplodingContext(FakeContext):
+            def run_turn(self, message):
+                raise RuntimeError("recovery failed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cursor = EventCursor(Path(tmp) / "cursor.json")
+            cursor.save(fingerprint(chat("ABBrain 你好", time="1")))
+            ctx = ExplodingContext(events=[chat("ABBrain 帮我砍树", time="2")])
+            agent = self.make_agent(ctx, cursor)
+            with self.assertRaises(RuntimeError):
+                agent.run_once("ABBrain")
+            # 关键断言：即使回合抛异常，cursor 也已推进到最新事件
+            self.assertEqual(fingerprint(chat("ABBrain 帮我砍树", time="2")), cursor.load())
+            # inbox 也被清空，不会残留事件
+            self.assertEqual([], ctx.inbox.read())
+
+    def test_cooldown_does_not_advance_cursor(self):
+        # cooldown 跳过的轮次不应推进 cursor，事件留给下次重试。
+        with tempfile.TemporaryDirectory() as tmp:
+            cursor = EventCursor(Path(tmp) / "cursor.json")
+            cursor.save(fingerprint(chat("ABBrain 你好", time="1")))
+            ctx = FakeContext(events=[chat("ABBrain 又喊你", time="2")])
+            clock = {"now": 1000}
+            agent = self.make_agent(
+                ctx, cursor, cooldown_seconds=120,
+                clock=lambda: clock["now"])
+            agent.run_once("ABBrain")          # 触发，记冷却
+            ctx.events = [chat("ABBrain 第三次", time="3")]
+            clock["now"] = 1100                # 冷却中
+            result = agent.run_once("ABBrain")
+            self.assertIsNone(result, "冷却期内不触发")
+            # cursor 仍停在触发后的事件（"ABBrain 又喊你"），没有推进到"第三次"
+            self.assertEqual(
+                fingerprint(chat("ABBrain 又喊你", time="2")), cursor.load())
+            clock["now"] = 1300                # 冷却结束
+            result = agent.run_once("ABBrain")
+            self.assertIsNotNone(result, "冷却结束后可触发")
+            self.assertEqual(
+                fingerprint(chat("ABBrain 第三次", time="3")), cursor.load())
+
+    def test_pending_checkpoint_is_recovered_before_new_events(self):
+        # 回归：上次回合因超时/中断留下 checkpoint（长任务后台跑完），
+        # 下一轮 run_once 应先自动恢复它，把任务结果接回来，而不是干等
+        # 玩家再次点名。
+        with tempfile.TemporaryDirectory() as tmp:
+            cursor = EventCursor(Path(tmp) / "cursor.json")
+            cursor.save(fingerprint(chat("ABBrain 你好", time="1")))
+            # 模拟"有事件但已消费 + 残留 checkpoint"
+            ctx = RecoveryContext(events=[chat("ABBrain 无关消息", time="2")])
+            # 强制 checkpoint 文件存在
+            ckpt_path = Path(tmp) / "checkpoint.json"
+            ckpt_path.write_text("{}", encoding="utf-8")
+            ctx.runtime = _FakeRuntime(_FakeCheckpoint(ctx))
+            ctx.runtime.checkpoint.path = ckpt_path
+            agent = self.make_agent(ctx, cursor)
+            result = agent.run_once("ABBrain")
+            self.assertIsNotNone(result)
+            self.assertGreaterEqual(ctx.recover_calls, 1)
+            self.assertIn("已恢复中断回合", result["final"])
 
     def test_survival_check_triggers_on_low_hunger(self):
         with tempfile.TemporaryDirectory() as tmp:
