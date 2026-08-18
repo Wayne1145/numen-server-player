@@ -195,7 +195,8 @@ class ActionBrainRuntime:
                  tools: list[dict[str, Any]], requires_control: dict[str, bool],
                  sleep: Callable[[float], None] = time.sleep, max_rounds: int = 8,
                  max_format_retries: int = 2,
-                 local_tools: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None) -> None:
+                 local_tools: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
+                 empty_result_cap: int = 2) -> None:
         self.store = store
         self.checkpoint = checkpoint
         self.mcp = mcp
@@ -206,6 +207,7 @@ class ActionBrainRuntime:
         self.sleep = sleep
         self.max_rounds = max_rounds
         self.max_format_retries = max_format_retries
+        self.empty_result_cap = empty_result_cap
         # 本地工具不经 MCP、不持租约(如 load_skill / remember_block)，由运行时直接执行。
         self.local_tools = local_tools or {}
 
@@ -244,7 +246,15 @@ class ActionBrainRuntime:
     def _continue_turn(self, *, base: list[dict[str, str]],
                        transient: list[dict[str, str]], actions: list[dict[str, Any]],
                        turn_id: str, user_content: str, start_round: int,
-                       mark_side_effect: Callable[[], None]) -> dict[str, Any]:
+                       mark_side_effect: Callable[[], None],
+                       empty_result_cap: int = 2) -> dict[str, Any]:
+        """驱动多轮决策直到模型收敛到 final 或轮次超限。
+
+        空结果收敛保护：当连续 N 次工具调用都返回 terminal=None（无终态、
+        无 task_id 的"queued"空包）时，主动打断循环并写一条 final，
+        避免模型在"永远填不满的反馈黑洞"里无限重试。
+        """
+        consecutive_empty = 0
         for number in range(start_round, self.max_rounds + 1):
                 correction: list[dict[str, str]] = []
                 decision = None
@@ -283,17 +293,27 @@ class ActionBrainRuntime:
                         1 for p in prior_decisions if _same_decision(p, decision)
                     )
                     if dup_count >= 1:
-                        correction.append({
-                            "role": "user",
-                            "content": (
-                                "注意：你刚刚重复派发了同一个工具且参数完全相同。"
-                                "如果它返回了 task_id，说明是异步任务，请用 "
-                                "task_status 查询其进度（别重复派发同一任务）；"
-                                "如果它已完成或无法完成，请直接返回 final 总结结果。"
-                                "不要再派发重复的工具调用。"
-                            ),
-                        })
-                        continue
+                        # 若前次同名工具执行返回的是"空结果"(无终态、无 task_id)，
+                        # 说明卡的是"排队黑洞"而非真异步任务——这时走空结果
+                        # 收敛保护(empty_result_cap)，不再重复注入提示，避免两个
+                        # 保护互相打架导致轮次被白白消耗。
+                        last_empty = (
+                            actions and actions[-1].get("tool") == decision["name"]
+                            and actions[-1].get("terminal") is None
+                            and actions[-1].get("task_id") is None
+                        )
+                        if not last_empty:
+                            correction.append({
+                                "role": "user",
+                                "content": (
+                                    "注意：你刚刚重复派发了同一个工具且参数完全相同。"
+                                    "如果它返回了 task_id，说明是异步任务，请用 "
+                                    "task_status 查询其进度（别重复派发同一任务）；"
+                                    "如果它已完成或无法完成，请直接返回 final 总结结果。"
+                                    "不要再派发重复的工具调用。"
+                                ),
+                            })
+                            continue
 
                 name = decision["name"]
                 available = name in self.requires_control or name in self.local_tools
@@ -343,6 +363,26 @@ class ActionBrainRuntime:
                     client_action_id=client_action_id,
                 )
                 actions.append({"tool": name, **outcome})
+                # 空结果收敛保护：工具返回无终态(terminal=None)且无 task_id
+                # 时，说明是一个"排队但不反馈"的感知黑洞；连续达到阈值就
+                # 主动写 final 收束，避免模型在黑洞里无限重试直到轮次超限。
+                terminal = outcome.get("terminal")
+                if terminal is None and outcome.get("task_id") is None:
+                    consecutive_empty += 1
+                    if consecutive_empty >= empty_result_cap:
+                        empty_final = (
+                            f"已尝试{number}次工具调用，但工具持续返回\"已排队/无结果\"，"
+                            "没有拿到可确认的结果。为避免无限重试，我先停下并汇报："
+                            "当前感知工具反馈不可用，暂时无法确认或完成目标。"
+                            "建议稍后再试，或更换可同步返回结果的感知方式。"
+                        )
+                        transcript = [*transient,
+                                      {"role": "assistant", "content": empty_final}]
+                        self._commit(turn_id, transcript)
+                        return {"final": empty_final, "actions": actions,
+                                "rounds": number, "early_final": "empty_result_cap"}
+                else:
+                    consecutive_empty = 0
                 tool_content = json.dumps(
                     compact_tool_outcome(name, outcome), ensure_ascii=False, sort_keys=True
                 )

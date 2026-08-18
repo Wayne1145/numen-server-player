@@ -66,7 +66,7 @@ def create_model_adapter(transport: Callable[[dict[str, Any]], dict[str, Any]],
             "model": LLM_MODEL,
             "stream": False,
             "temperature": 0,
-            "max_tokens": 2048,
+            "max_tokens": 512,
             "messages": [
                 {"role": "system", "content": persona_block + SYSTEM_PROMPT
                  + "\n<available_tools>" + tool_text + "</available_tools>"},
@@ -157,10 +157,12 @@ def attach_events(message: str, events: list[dict[str, Any]]) -> str:
 
 
 def live_transport(payload: dict[str, Any]) -> dict[str, Any]:
+    # 单请求 60s 超时 + 失败重试 1 次 + 间隔 1s，避免单轮推理把守护进程卡住
+    # 25 分钟（旧值 150s×2=300s），让轮询/事件响应保持灵敏。
     return retry_transient(
-        lambda: post_json(LLM_URL, payload, headers=LLM_HEADERS, timeout=150),
+        lambda: post_json(LLM_URL, payload, headers=LLM_HEADERS, timeout=60),
         attempts=2,
-        delay_seconds=3,
+        delay_seconds=1,
     )
 
 
@@ -175,7 +177,7 @@ def create_compactor(transport: Callable[[dict[str, Any]], dict[str, Any]]) -> C
             "model": LLM_MODEL,
             "stream": False,
             "temperature": 0,
-            "max_tokens": 2048,
+            "max_tokens": 512,
             "messages": [{"role": "user", "content": COMPACT_PROMPT + "\n\n" + history_text}],
         }
         response = transport(payload)

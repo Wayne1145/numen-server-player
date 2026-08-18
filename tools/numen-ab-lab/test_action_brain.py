@@ -261,6 +261,58 @@ class PersistentActionTurnTest(unittest.TestCase):
             goto_calls = [args for name, args in mcp.calls if name == "goto"]
             self.assertEqual(2, len(goto_calls), "不同参数的两个 goto 都合法")
 
+    def test_consecutive_empty_tool_results_trigger_early_final(
+            self):
+        # 回归：感知工具返回无 task_id 的"queued 空包"(terminal=None)，
+        # 模型永远拿不到结果会无限重试。连续达到阈值应主动 early_final
+        # 收束，而不是耗到 max_rounds 超限。
+        class QueuedMcp:
+            def __init__(self):
+                self.calls = []
+
+            def call(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                if name == "acquire_control":
+                    return {"lease_id": "lease-1"}
+                if name == "release_control":
+                    return "released"
+                # 模仿 locate_biome/scan_blocks：排队但不给结果、无 task_id
+                return {"success": True,
+                        "message": "action queued (sync task) — perceive to confirm"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = BrainSessionStore(root / "sessions", "ab", "uuid-1")
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            mcp = QueuedMcp()
+            # 模型不停地调用"排队黑洞"工具
+            answers = iter([
+                '{"type":"tool","name":"scan_blocks","arguments":{"block_ids":["minecraft:oak_log"],"radius":64}}',
+                '{"type":"tool","name":"scan_blocks","arguments":{"block_ids":["minecraft:oak_log"],"radius":64}}',
+            ])
+
+            runtime = ActionBrainRuntime(
+                store=store, checkpoint=checkpoint, mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "scan_blocks", "parameters": {}}],
+                requires_control={"scan_blocks": True},
+                local_tools={},
+                sleep=lambda _: None,
+                max_rounds=8,
+                empty_result_cap=2,
+            )
+            result = runtime.run_turn("找棵树")
+
+            # 关键断言：应通过 early_final 收束，而非耗到轮次超限
+            self.assertIn("early_final", result)
+            self.assertEqual("empty_result_cap", result["early_final"])
+            self.assertIsInstance(result["final"], str)
+            self.assertIn("感知工具", result["final"])
+            self.assertFalse(checkpoint.path.exists())
+            # 至多 dispatch 了 2 次（达到阈值即停），没有无限重试
+            scan_calls = [c for c in mcp.calls if c[0] == "scan_blocks"]
+            self.assertLessEqual(len(scan_calls), 2)
+
     def test_write_action_injects_client_action_id(self):
         mcp = FakeMcp([{"state": "done", "task_id": "t9", "result": {"success": True}}])
         execute_tool_exact(
