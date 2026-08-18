@@ -87,7 +87,8 @@ class CompanionContext:
             tools=[*tools, *local_schemas],
             requires_control=requires_control,
             local_tools=local_tools,
-            max_rounds=12,
+            # 复合生存任务常需十余步；真循环由专项 guard 快速中断。
+            max_rounds=24,
         )
         self.lock = threading.Lock()
 

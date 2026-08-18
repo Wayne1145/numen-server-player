@@ -264,7 +264,8 @@ def main() -> None:
         tools=tools,
         requires_control=requires_control,
         local_tools=local_tools,
-        max_rounds=12,
+        # 对有实质进展的长链任务宽容；死循环由专项 guard 限制。
+        max_rounds=24,
     )
 
     before = len(store.messages())

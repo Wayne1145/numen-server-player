@@ -260,6 +260,35 @@ class PersistentActionTurnTest(unittest.TestCase):
                              "重复的相同工具调用应被循环检测拦截，只 dispatch 一次")
             self.assertFalse(checkpoint.path.exists())
 
+    def test_duplicate_tool_correction_is_visible_to_next_model_call(self):
+        # 循环保护不能只拦截调用；纠正提示必须进入下一轮模型上下文。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mcp = FakeMcp([{"state": "done", "task_id": "t9", "result": {"success": True}}])
+            answers = iter([
+                '{"type":"tool","name":"goto","arguments":{"x":6.5,"z":0.5}}',
+                '{"type":"tool","name":"goto","arguments":{"x":6.5,"z":0.5}}',
+                '{"type":"final","content":"已停止重复"}',
+            ])
+            observed = []
+
+            def model(messages, _tools):
+                observed.append(messages)
+                return next(answers)
+
+            runtime = ActionBrainRuntime(
+                store=BrainSessionStore(root / "sessions", "ab", "uuid-correction"),
+                checkpoint=TurnCheckpoint(root / "checkpoint.json"),
+                mcp=mcp, companion="ABBrain", model=model,
+                tools=[{"name": "goto", "parameters": {}}],
+                requires_control={"goto": True}, local_tools={},
+                sleep=lambda _: None, max_rounds=6,
+            )
+            result = runtime.run_turn("走过去")
+            self.assertEqual("已停止重复", result["final"])
+            third_context = "\n".join(m.get("content", "") for m in observed[2])
+            self.assertIn("不要再派发重复的工具调用", third_context)
+
     def test_different_args_same_tool_not_blocked(self):
         # 同一工具但不同参数（不同目标）是合法调用，不应被循环检测误伤。
         with tempfile.TemporaryDirectory() as tmp:
@@ -290,6 +319,49 @@ class PersistentActionTurnTest(unittest.TestCase):
             self.assertEqual("完成。", result["final"])
             goto_calls = [args for name, args in mcp.calls if name == "goto"]
             self.assertEqual(2, len(goto_calls), "不同参数的两个 goto 都合法")
+
+    def test_same_tool_and_args_allowed_after_intervening_world_change(self):
+        # 回归真实铁镐链：第一次 craft 因无工作台失败，随后 build 成功改变
+        # 世界状态，再次 craft 相同参数必须放行，不能被历史级重复保护永久拉黑。
+        class StatefulMcp(FakeMcp):
+            def call(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                if name == "acquire_control":
+                    return {"lease_id": "lease-1"}
+                if name == "release_control":
+                    return "released"
+                if name == "craft":
+                    craft_count = len([x for x in self.calls if x[0] == "craft"])
+                    if craft_count == 1:
+                        raise RuntimeError(
+                            'MCP tool call failed: {"success":false,"message":"needs crafting table"}')
+                    return {"success": True, "message": "crafted iron_pickaxe"}
+                if name == "build":
+                    return {"success": True, "message": "placed crafting_table"}
+                return {"success": True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mcp = StatefulMcp()
+            answers = iter([
+                '{"type":"tool","name":"craft","arguments":{"item_id":"minecraft:iron_pickaxe"}}',
+                '{"type":"tool","name":"build","arguments":{"blocks":[{"block_id":"minecraft:crafting_table","x":1,"y":2,"z":3}]}}',
+                '{"type":"tool","name":"craft","arguments":{"item_id":"minecraft:iron_pickaxe"}}',
+                '{"type":"final","content":"铁镐完成"}',
+            ])
+            runtime = ActionBrainRuntime(
+                store=BrainSessionStore(root / "sessions", "ab", "uuid-state-change"),
+                checkpoint=TurnCheckpoint(root / "checkpoint.json"),
+                mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "craft", "parameters": {}},
+                       {"name": "build", "parameters": {}}],
+                requires_control={"craft": True, "build": True},
+                local_tools={}, sleep=lambda _: None, max_rounds=8,
+            )
+            result = runtime.run_turn("做铁镐")
+            self.assertEqual("铁镐完成", result["final"])
+            self.assertEqual(2, len([x for x in mcp.calls if x[0] == "craft"]))
 
     def test_consecutive_empty_tool_results_trigger_early_final(
             self):
@@ -337,7 +409,7 @@ class PersistentActionTurnTest(unittest.TestCase):
             self.assertIn("early_final", result)
             self.assertEqual("empty_result_cap", result["early_final"])
             self.assertIsInstance(result["final"], str)
-            self.assertIn("感知工具", result["final"])
+            self.assertIn("工具反馈链路", result["final"])
             self.assertFalse(checkpoint.path.exists())
             # 至多 dispatch 了 2 次（达到阈值即停），没有无限重试
             scan_calls = [c for c in mcp.calls if c[0] == "scan_blocks"]
@@ -460,6 +532,70 @@ class PersistentActionTurnTest(unittest.TestCase):
             self.assertNotIn("early_final", result)
             self.assertEqual("状态正常", result["final"])
             self.assertFalse(checkpoint.path.exists())
+
+    def test_sync_tools_with_message_results_are_not_counted_as_empty(self):
+        # lookup_recipe 的完整配方只放在 message 中，没有 data；连续两次
+        # 成功查询不能被判成“已排队/无结果”。
+        class RecipeMcp:
+            def call(self, name, arguments):
+                return {"success": True,
+                        "message": f"recipe(s) for {arguments['item_id']}: planks -> item"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            answers = iter([
+                '{"type":"tool","name":"lookup_recipe","arguments":{"item_id":"minecraft:stick"}}',
+                '{"type":"tool","name":"lookup_recipe","arguments":{"item_id":"minecraft:iron_pickaxe"}}',
+                '{"type":"final","content":"配方查询完成"}',
+            ])
+            runtime = ActionBrainRuntime(
+                store=BrainSessionStore(root / "sessions", "ab", "uuid-recipe"),
+                checkpoint=TurnCheckpoint(root / "checkpoint.json"),
+                mcp=RecipeMcp(), companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "lookup_recipe", "parameters": {}}],
+                requires_control={"lookup_recipe": False}, local_tools={},
+                sleep=lambda _: None, max_rounds=6, empty_result_cap=2,
+            )
+            result = runtime.run_turn("查两次配方")
+            self.assertEqual("配方查询完成", result["final"])
+            self.assertNotIn("early_final", result)
+
+    def test_live_business_failure_is_immediately_fed_back_and_releases_lease(self):
+        # 正常执行（非 recover_turn）遇到 craft 缺材料，应在同一回合立即
+        # 让模型改方案；即使 dispatch 抛错也必须释放控制租约。
+        class BusinessFailMcp(FakeMcp):
+            def call(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                if name == "acquire_control":
+                    return {"lease_id": "lease-1"}
+                if name == "release_control":
+                    return "released"
+                if name == "craft":
+                    raise RuntimeError(
+                        'MCP tool call failed: {"success":false,"message":"missing 2x stick"}')
+                return {"success": True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mcp = BusinessFailMcp()
+            answers = iter([
+                '{"type":"tool","name":"craft","arguments":{"item_id":"minecraft:iron_pickaxe"}}',
+                '{"type":"final","content":"缺木棍，已调整计划"}',
+            ])
+            runtime = ActionBrainRuntime(
+                store=BrainSessionStore(root / "sessions", "ab", "uuid-fail"),
+                checkpoint=TurnCheckpoint(root / "checkpoint.json"),
+                mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "craft", "parameters": {}}],
+                requires_control={"craft": True}, local_tools={},
+                sleep=lambda _: None, max_rounds=4,
+            )
+            result = runtime.run_turn("做铁镐")
+            self.assertEqual("缺木棍，已调整计划", result["final"])
+            self.assertEqual(1, len([x for x in mcp.calls if x[0] == "release_control"]))
+            self.assertFalse(runtime.checkpoint.path.exists())
 
     def test_write_action_injects_client_action_id(self):
         mcp = FakeMcp([{"state": "done", "task_id": "t9", "result": {"success": True}}])

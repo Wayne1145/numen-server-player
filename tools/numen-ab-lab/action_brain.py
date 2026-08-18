@@ -29,10 +29,27 @@ def _is_queued_empty(dispatch: Any) -> bool:
     """
     if not isinstance(dispatch, dict):
         return not dispatch          # None/[] 视为空
-    if dispatch.get("message") and "queued" in str(dispatch["message"]):
+    message = str(dispatch.get("message") or "")
+    if "queued" in message.lower():
         return True                  # 排队占位包
-    substantive = [k for k in dispatch if k not in ("success", "message", "type")]
-    return not substantive           # 除元字段外无任何数据 → 空
+    # message 本身就是实质结果：lookup_recipe 等同步工具把完整配方放在
+    # message 中，不一定另带 data。旧逻辑排除了 message，导致连续两次
+    # 成功配方查询被误计为两个空结果并触发 early_final。
+    if message.strip():
+        return False
+    substantive = [k for k in dispatch if k not in ("success", "type")]
+    return not substantive           # 空字典/仅 success、type → 空
+
+
+def _is_business_tool_failure(exc: BaseException) -> bool:
+    """区分可供模型修正的工具业务拒绝与基础设施异常。"""
+    text = str(exc)
+    normalized = text.replace(" ", "").lower()
+    return "MCP tool call failed:" in text and (
+        '"success":false' in normalized
+        or "tool rejected the call:" in text.lower()
+        or "身体正忙" in text
+    )
 
 
 def compact_tool_outcome(name: str, outcome: dict[str, Any]) -> dict[str, Any]:
@@ -175,16 +192,27 @@ def execute_tool_exact(mcp: Any, *, companion: str, name: str,
         lease_id = None
     try:
         dispatch = mcp.call(name, call_args)
-    finally:
-        pass
+    except BaseException:
+        # 派发失败没有回执可落盘，但仍必须立刻释放租约；否则只能等
+        # 服务端 TTL，连续业务失败会制造次生“控制权正忙”。
+        if lease_id is not None:
+            try:
+                mcp.call("release_control", {
+                    "companion": companion, "lease_id": lease_id,
+                })
+            except Exception:
+                pass
+        raise
     task_id = _task_id(dispatch)
     if on_dispatched is not None:
+        # 成功派发时仍保持原有崩溃安全顺序：先把回执/task_id 落 checkpoint，
+        # 再释放租约，避免“动作已受理但恢复信息未保存”的歧义窗口。
         on_dispatched(dispatch, task_id)
-    # 派发回执(含 task_id)已优先落盘；释放失败不能掩盖已取得的动作结果，
-    # 租约有服务端 TTL 兜底(LeaseRegistry 会清扫)。
     if lease_id is not None:
         try:
-            mcp.call("release_control", {"companion": companion, "lease_id": lease_id})
+            mcp.call("release_control", {
+                "companion": companion, "lease_id": lease_id,
+            })
         except Exception:
             pass
     if task_id is None:
@@ -275,8 +303,12 @@ class ActionBrainRuntime:
         """
         consecutive_empty = 0
         unavailable_budget = 0
+        pending_correction: list[dict[str, str]] = []
         for number in range(start_round, self.max_rounds + 1):
-                correction: list[dict[str, str]] = []
+                # 跨轮保留循环/不可用工具纠正。旧代码把 correction 建在循环内，
+                # append 后立刻 continue，下一轮又重置为空，模型从未见到提示。
+                correction = pending_correction
+                pending_correction = []
                 decision = None
                 for attempt in range(self.max_format_retries + 1):
                     raw = self.model([*base, *transient, *correction], self.tools)
@@ -305,25 +337,27 @@ class ActionBrainRuntime:
                 # 不重复执行，而是注入提示引导它用 task_status 查进度或收敛到
                 # final。否则会因 execute_tool_exact 同步等待超时/轮次超限而死循环。
                 if decision["type"] == "tool":
-                    prior_decisions = [
-                        m.get("content") for m in transient
+                    # 只拦截“紧邻的原样重复”。同一工具在中间发生了采集、
+                    # 合成、移动、放置等状态变化后必须允许重试：例如第一次
+                    # craft iron_pickaxe 因无工作台失败，放好工作台后再次 craft
+                    # 是合法推进。旧逻辑扫描整个 transient，导致这类重试被
+                    # 永久拉黑并空耗 max_rounds。
+                    latest_assistant = next((
+                        m.get("content") for m in reversed(transient)
                         if m.get("role") == "assistant"
-                    ]
-                    dup_count = sum(
-                        1 for p in prior_decisions if _same_decision(p, decision)
-                    )
-                    if dup_count >= 1:
-                        # 若前次同名工具执行返回的是"空结果"(无终态、无 task_id)，
-                        # 说明卡的是"排队黑洞"而非真异步任务——这时走空结果
-                        # 收敛保护(empty_result_cap)，不再重复注入提示，避免两个
-                        # 保护互相打架导致轮次被白白消耗。
+                    ), None)
+                    is_immediate_duplicate = _same_decision(latest_assistant, decision)
+                    if is_immediate_duplicate:
+                        # 若前次同名工具执行返回的是真正 queued 空包，说明卡的是
+                        # “排队黑洞”；走 empty_result_cap，不与重复保护互相打架。
                         last_empty = (
                             actions and actions[-1].get("tool") == decision["name"]
                             and actions[-1].get("terminal") is None
                             and actions[-1].get("task_id") is None
+                            and _is_queued_empty(actions[-1].get("dispatch"))
                         )
                         if not last_empty:
-                            correction.append({
+                            pending_correction.append({
                                 "role": "user",
                                 "content": (
                                     "注意：你刚刚重复派发了同一个工具且参数完全相同。"
@@ -345,7 +379,7 @@ class ActionBrainRuntime:
                     if unavailable_budget is None:
                         unavailable_budget = 0
                     unavailable_budget += 1
-                    correction.append({
+                    pending_correction.append({
                         "role": "user",
                         "content": (
                             f"工具 {name} 在当前服务器不可用（已停用/不在可用列表）。"
@@ -400,13 +434,22 @@ class ActionBrainRuntime:
                         "transcript": transient,
                     })
 
-                outcome = execute_tool_exact(
-                    self.mcp, companion=self.companion, name=name,
-                    arguments=decision["arguments"],
-                    requires_control=self.requires_control.get(name, False), sleep=self.sleep,
-                    on_dispatched=record_dispatch,
-                    client_action_id=client_action_id,
-                )
+                try:
+                    outcome = execute_tool_exact(
+                        self.mcp, companion=self.companion, name=name,
+                        arguments=decision["arguments"],
+                        requires_control=self.requires_control.get(name, False), sleep=self.sleep,
+                        on_dispatched=record_dispatch,
+                        client_action_id=client_action_id,
+                    )
+                except RuntimeError as exc:
+                    if not _is_business_tool_failure(exc):
+                        raise
+                    # 缺材料、参数拒绝等业务失败是规划反馈：同一回合立即
+                    # 回灌模型，不必先崩溃、等下一次 poll 再恢复。
+                    failure = {"success": False, "message": str(exc)}
+                    outcome = {"dispatch": failure, "task_id": None,
+                               "terminal": failure, "samples": []}
                 actions.append({"tool": name, **outcome})
                 # 空结果收敛保护：仅当工具返回"排队占位包"（无任何实质数据）时
                 # 才计数。同步感知工具（get_self_status / scan_nearby_entities /
@@ -420,10 +463,10 @@ class ActionBrainRuntime:
                     consecutive_empty += 1
                     if consecutive_empty >= empty_result_cap:
                         empty_final = (
-                            f"已尝试{number}次工具调用，但工具持续返回\"已排队/无结果\"，"
-                            "没有拿到可确认的结果。为避免无限重试，我先停下并汇报："
-                            "当前感知工具反馈不可用，暂时无法确认或完成目标。"
-                            "建议稍后再试，或更换可同步返回结果的感知方式。"
+                            f"已连续 {consecutive_empty} 次调用工具，但工具都只返回"
+                            "‘已排队/无结果’占位包，没有拿到可确认的结果。"
+                            "为避免无限重试，我先停下并汇报：当前工具反馈链路不可用，"
+                            "暂时无法确认或完成目标。建议改用可同步返回结果的工具。"
                         )
                         transcript = [*transient,
                                       {"role": "assistant", "content": empty_final}]
@@ -522,6 +565,8 @@ class ActionBrainRuntime:
                 )
                 terminal = outcome.get("terminal")
             except RuntimeError as exc:
+                if not _is_business_tool_failure(exc):
+                    raise
                 # 业务失败（如 craft 缺材料、mine 无目标）不是系统错误：把失败
                 # 结果交还给模型重新决策，而不是抛异常让恢复计数堆积 →
                 # 3 次后清 checkpoint 丢回合。模型看到"缺 2x stick"后会转而

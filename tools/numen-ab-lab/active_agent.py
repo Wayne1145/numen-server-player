@@ -147,10 +147,11 @@ class ActiveAgent:
                         self._send_reply(ctx, final)
                     self._last_turn[companion] = now
                     return result
-            except Exception:
-                # 任务还在跑（超时未完成）或 checkpoint 已坏：不打断，继续常规轮询。
-                # 恢复失败计数交给 _auto_turn 的 RecoveryRequired 路径处理。
-                pass
+            except Exception as exc:
+                # 任务仍在运行或模型/提供商暂时失败时保留 checkpoint，但必须
+                # 留下可见日志。旧代码裸 pass 让服务看似 active、身体 idle，
+                # 实际每轮恢复都可能超时/耗尽轮次，用户与运维侧完全无证据。
+                _log.warning("挂起 checkpoint 自动恢复暂未完成: %s", exc)
 
         events = ctx.list_recent_events(count=50)
         cursor = cursor_store.load()
