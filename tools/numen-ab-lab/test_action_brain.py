@@ -407,6 +407,60 @@ class PersistentActionTurnTest(unittest.TestCase):
             self.assertFalse(checkpoint.path.exists())
             self.assertIn("不可用", result["final"])
 
+    def test_sync_tool_with_data_is_not_counted_as_empty(self):
+        # 回归：get_self_status / scan_nearby_entities 等同步工具虽然
+        # task_id=None、terminal=None，但 dispatch 里有真实数据（hp/entities）。
+        # 旧逻辑把它们计入"空结果"，模型连续调用两次就被 early_final 掐断，
+        # 表现为"明明有结果却说感知不可用"。修复后只对排队占位包计数。
+        class SyncDataMcp:
+            def __init__(self):
+                self.calls = []
+
+            def call(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                if name == "acquire_control":
+                    return {"lease_id": "lease-1"}
+                if name == "release_control":
+                    return "released"
+                # 同步感知：dispatch 有真实数据，无 task_id
+                if name == "scan_nearby_entities":
+                    return {"dispatch": {"entities": [
+                        {"id": 1, "type": "zombie", "distance": 5.0}]}}
+                if name == "get_self_status":
+                    return {"dispatch": {"hp": 20.0, "name": "ABBrain",
+                                         "position": {"x": 0, "y": 64, "z": 0}}}
+                return {"success": True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = BrainSessionStore(root / "sessions", "ab", "uuid-1")
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            mcp = SyncDataMcp()
+            # 模型连续调用两个同步感知工具（都有数据），然后 final
+            answers = iter([
+                '{"type":"tool","name":"scan_nearby_entities","arguments":{"radius":16}}',
+                '{"type":"tool","name":"get_self_status","arguments":{}}',
+                '{"type":"final","content":"状态正常"}',
+            ])
+            runtime = ActionBrainRuntime(
+                store=store, checkpoint=checkpoint, mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "scan_nearby_entities", "parameters": {}},
+                       {"name": "get_self_status", "parameters": {}}],
+                requires_control={"scan_nearby_entities": False,
+                                  "get_self_status": False},
+                local_tools={},
+                sleep=lambda _: None,
+                max_rounds=8,
+                empty_result_cap=2,
+            )
+            result = runtime.run_turn("看看周围")
+
+            # 关键断言：没有触发 early_final，模型正常完成 final
+            self.assertNotIn("early_final", result)
+            self.assertEqual("状态正常", result["final"])
+            self.assertFalse(checkpoint.path.exists())
+
     def test_write_action_injects_client_action_id(self):
         mcp = FakeMcp([{"state": "done", "task_id": "t9", "result": {"success": True}}])
         execute_tool_exact(

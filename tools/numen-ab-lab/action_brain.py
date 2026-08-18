@@ -17,6 +17,24 @@ from persistent_brain import BrainSessionStore, fsync_dir
 TERMINAL_STATES = {"done", "failed", "timeout", "stopped", "error"}
 
 
+def _is_queued_empty(dispatch: Any) -> bool:
+    """判定 MCP 工具回执是否为"排队占位包"(无任何实质数据)。
+
+    同步感知工具(get_self_status / scan_nearby_entities / look_around /
+    get_world_info 等)返回 dispatch 里有 hp/inventory/entities 等真实数据,
+    只是没有 task_id——这些不是空结果。真正的黑洞是异步工具在同步路径
+    下返回的占位包:{"success":true,"message":"action queued (sync task) —
+    perceive to confirm"} 或空 dict,模型拿不到任何反馈。这里区分两者,
+    避免 empty_result_cap 误伤正常同步工具。
+    """
+    if not isinstance(dispatch, dict):
+        return not dispatch          # None/[] 视为空
+    if dispatch.get("message") and "queued" in str(dispatch["message"]):
+        return True                  # 排队占位包
+    substantive = [k for k in dispatch if k not in ("success", "message", "type")]
+    return not substantive           # 除元字段外无任何数据 → 空
+
+
 def compact_tool_outcome(name: str, outcome: dict[str, Any]) -> dict[str, Any]:
     """长期历史只保留派发、task_id 与终态；高频轮询样本留在运行审计结果中。"""
     return {
@@ -390,11 +408,15 @@ class ActionBrainRuntime:
                     client_action_id=client_action_id,
                 )
                 actions.append({"tool": name, **outcome})
-                # 空结果收敛保护：工具返回无终态(terminal=None)且无 task_id
-                # 时，说明是一个"排队但不反馈"的感知黑洞；连续达到阈值就
-                # 主动写 final 收束，避免模型在黑洞里无限重试直到轮次超限。
+                # 空结果收敛保护：仅当工具返回"排队占位包"（无任何实质数据）时
+                # 才计数。同步感知工具（get_self_status / scan_nearby_entities /
+                # look_around）虽然 task_id=None，但 dispatch 里有真实结果，
+                # 不算空——否则模型每连续调用两次同步工具就会被误判掐断，
+                # 表现为"明明有结果却说感知不可用"。真正的黑洞是
+                # {"success":true,"message":"action queued ..."} 这种占位包。
                 terminal = outcome.get("terminal")
-                if terminal is None and outcome.get("task_id") is None:
+                if terminal is None and outcome.get("task_id") is None \
+                        and _is_queued_empty(outcome.get("dispatch")):
                     consecutive_empty += 1
                     if consecutive_empty >= empty_result_cap:
                         empty_final = (
@@ -429,9 +451,22 @@ class ActionBrainRuntime:
         samples: list[Any] = []
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
-            status = self.mcp.call("task_status", {
-                "companion": self.companion, "task_id": task_id,
-            })
+            try:
+                status = self.mcp.call("task_status", {
+                    "companion": self.companion, "task_id": task_id,
+                })
+            except RuntimeError as exc:
+                # 任务完成/被停后服务端会清理记录,后续 task_status 返回
+                # isError+unknown task_id(MCP 层抛 RuntimeError)。此时任务
+                # 已经结束(结果已消费或丢失),把它当作终态收束,而不是
+                # 一直重试到超时把回合挂死。
+                msg = str(exc)
+                if "unknown task_id" in msg:
+                    return {"terminal": {
+                        "state": "done", "task_id": task_id,
+                        "detail": "cleared after completion", "result": None,
+                    }, "samples": samples}
+                raise
             samples.append(status)
             state = status.get("state") if isinstance(status, dict) else None
             if state in TERMINAL_STATES:
