@@ -9,6 +9,7 @@ from active_agent import (
     TriggerPolicy,
     fingerprint,
 )
+from action_brain import RecoveryRequired
 
 
 class FakeContext:
@@ -77,6 +78,98 @@ class SurvivalPolicyTest(unittest.TestCase):
         self.assertTrue(policy.needs_attention({"hp": 30, "hunger": 20}))
         self.assertTrue(policy.needs_attention({"hp": 80, "hunger": 3}))
         self.assertFalse(policy.needs_attention({"hp": 80, "hunger": 18}))
+
+
+class RecoveryContext(FakeContext):
+    """run_turn 首次抛 RecoveryRequired，recover_turn 可配置失败次数。"""
+    def __init__(self, events=None, status=None, recover_failures=0):
+        super().__init__(events, status)
+        self.recover_calls = 0
+        self.mcp = FakeMcp()
+        self.recover_failures = recover_failures
+        self.cleared = False
+        # 模拟 ActionBrainRuntime.checkpoint
+        self.runtime = _FakeRuntime(_FakeCheckpoint(self))
+
+    def run_turn(self, message):
+        # checkpoint 存在（未清除）时每次 run_turn 都拒绝，模拟 RecoveryRequired
+        if not self.cleared:
+            raise RecoveryRequired("incomplete side-effect checkpoint exists")
+        return super().run_turn(message)
+
+    def recover_turn(self):
+        self.recover_calls += 1
+        if self.recover_failures > 0:
+            self.recover_failures -= 1
+            raise RecoveryRequired("recovery failed: bad tool args")
+        return {"final": "已恢复中断回合", "actions": [],
+                "history_before": 0, "history_after": 2}
+
+
+class _FakeCheckpoint:
+    def __init__(self, ctx):
+        self.path = "/fake/checkpoint.json"
+        self._ctx = ctx
+
+    def clear(self):
+        self._ctx.cleared = True
+
+
+class _FakeRuntime:
+    def __init__(self, ckpt):
+        self.checkpoint = ckpt
+
+
+class FakeMcp:
+    def call(self, name, args):
+        return {"lease_id": "lease-1"}
+
+
+class RecoveryOnInterruptTest(unittest.TestCase):
+    def test_interrupted_checkpoint_triggers_recovery_not_silent_skip(self):
+        # 回归：长任务被外部终止后残留 checkpoint，_auto_turn 应自动 recover_turn
+        # 而不是被 except:continue 静默吞掉导致假人永久沉默。
+        with tempfile.TemporaryDirectory() as tmp:
+            cursor = EventCursor(Path(tmp) / "cursor.json")
+            cursor.save(fingerprint(chat("ABBrain 你好", time="1")))
+            ctx = RecoveryContext(events=[chat("ABBrain 在吗", time="2")])
+            agent = ActiveAgent(
+                context_factory=lambda companion: ctx,
+                cursor_store=cursor,
+                poll_seconds=15, survival_interval=60, cooldown_seconds=120,
+                clock=lambda: 1000,
+            )
+            result = agent.run_once("ABBrain")
+            self.assertIsNotNone(result, "应产出结果而不是静默跳过")
+            self.assertEqual(1, ctx.recover_calls, "应调用一次 recover_turn")
+            self.assertFalse(ctx.cleared, "成功恢复不清除 checkpoint")
+
+    def test_repeated_recovery_failure_clears_bad_checkpoint(self):
+        # 回归：坏 checkpoint（模型生成无效参数）连续恢复失败 3 次后应被清除，
+        # 否则假人会被死循环卡死、无法响应新任务。
+        with tempfile.TemporaryDirectory() as tmp:
+            cursor = EventCursor(Path(tmp) / "cursor.json")
+            cursor.save(fingerprint(chat("ABBrain 你好", time="1")))
+            # 每次 run_once 都会触发（游标每次被新事件推进）
+            ctx = RecoveryContext(events=[chat("ABBrain 在吗", time="2")],
+                                  recover_failures=99)
+            agent = ActiveAgent(
+                context_factory=lambda companion: ctx,
+                cursor_store=cursor,
+                poll_seconds=15, survival_interval=60, cooldown_seconds=120,
+                clock=lambda: 1000,
+            )
+            # 需要多次触发以累加失败计数；直接调用 _auto_turn 或调整。
+            # 这里模拟 3 次触发：每次给 agent 一个新事件推进游标
+            for i in range(3):
+                ctx.events = [chat("ABBrain 触发%d" % i, time=str(2 + i))]
+                cursor.save(fingerprint(chat("ABBrain 你好", time="1")))
+                try:
+                    agent.run_once("ABBrain")
+                except RecoveryRequired:
+                    pass
+            self.assertGreaterEqual(ctx.recover_calls, 3, "应尝试恢复至少3次")
+            self.assertTrue(ctx.cleared, "连续失败3次后应清除 checkpoint")
 
 
 class ActiveAgentTest(unittest.TestCase):

@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 from event_inbox import EventInbox
 from persistent_brain import fsync_dir
+from action_brain import RecoveryRequired
 
 
 def fingerprint(event: dict[str, Any]) -> str:
@@ -116,6 +117,7 @@ class ActiveAgent:
             "规则：玩家点名给任务 → 执行；无任务纯聊天 → 回话。不要擅自做玩家没要求的大范围破坏。")
         self._last_turn: dict[str, float] = {}
         self._last_survival_check: dict[str, float] = {}
+        self._recovery_failures: dict[str, int] = {}
 
     def _cursor_for(self, companion: str, ctx: Any) -> EventCursor:
         if callable(self.cursor_store):
@@ -181,7 +183,43 @@ class ActiveAgent:
         message = message or self.message_template
         for event in events:
             ctx.inbox.push(event)
-        result = ctx.run_turn(message)
+        try:
+            result = ctx.run_turn(message)
+        except RecoveryRequired:
+            # 上次回合被外部中断（/numen stop、超时或进程被杀）而残留 checkpoint。
+            # 自动尝试 recover_turn：恢复是幂等的（poll 原 task / 幂等
+            # client_action_id），不会产生二次副作用；成功后正常走完回合并回话，
+            # 避免"长任务被终止后假人永久沉默"。
+            import logging
+            _log = logging.getLogger("active_agent")
+            # 用 checkpoint 文件路径作键，跟踪连续恢复失败次数，防止"坏 checkpoint
+            # 反复恢复失败"死循环（如模型生成无效工具参数，重试不会变好）。
+            ckpt_path = getattr(
+                getattr(ctx, "runtime", None), "checkpoint", None)
+            key = str(getattr(ckpt_path, "path", companion))
+            try:
+                _log.info("检测到残留 checkpoint，尝试自动恢复中断回合")
+                result = ctx.recover_turn()
+                self._recovery_failures.pop(key, None)
+                _log.info("中断回合恢复完成: %s",
+                          (result or {}).get("final", "")[:80])
+            except Exception as recover_exc:
+                n = self._recovery_failures.get(key, 0) + 1
+                self._recovery_failures[key] = n
+                _log.warning("自动恢复失败(%d/3): %s", n, recover_exc)
+                if n >= 3:
+                    # 连续 3 次失败说明 checkpoint 已坏（无效参数/损坏），
+                    # 保留只会让该假人永久卡住；清除它，让新任务能启动。
+                    _log.warning("恢复反复失败，清除损坏 checkpoint: %s", key)
+                    if ckpt_path is not None:
+                        try:
+                            ckpt_path.clear()
+                        except Exception:
+                            pass
+                    self._recovery_failures.pop(key, None)
+                    # 放弃本轮恢复，转为普通回合（可能仍会抛，但至少不循环）。
+                    raise
+                raise
         # 把模型回合的最终回复发回游戏聊天栏，让玩家能直接看到/听到假人回应。
         # run_turn 返回 {"final": ..., "actions": [...], ...};final 是模型生成的
         # 中文/自然语言回复(可能含工具执行的总结)。用 MCP send_chat 让假人在

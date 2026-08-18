@@ -66,7 +66,7 @@ def create_model_adapter(transport: Callable[[dict[str, Any]], dict[str, Any]],
             "model": LLM_MODEL,
             "stream": False,
             "temperature": 0,
-            "max_tokens": 600,
+            "max_tokens": 2048,
             "messages": [
                 {"role": "system", "content": persona_block + SYSTEM_PROMPT
                  + "\n<available_tools>" + tool_text + "</available_tools>"},
@@ -75,7 +75,24 @@ def create_model_adapter(transport: Callable[[dict[str, Any]], dict[str, Any]],
         }
         response = transport(payload)
         message = response["choices"][0]["message"]
-        content = message.get("content") or message.get("reasoning_content") or ""
+        # 只信任模型最终输出 content。推理模型(qwen3.5-9b 思维链)的思考在
+        # reasoning_content，不能拿去当决策——那会导致"吐字截断/拿思考顶包"。
+        # content 为空表示本轮没产出决策文本(推理占满预算/只输出思考)。
+        # 此时追加一条纠正消息重试一次(明确要求只给 JSON)，而不是拿思考顶包
+        # 或直接失败。仍为空才抛错，交由外层兜底。
+        content = message.get("content") or ""
+        if not isinstance(content, str) or not content.strip():
+            correction = [{
+                "role": "assistant", "content": "(无输出)",
+            }, {
+                "role": "user",
+                "content": "你没有产出任何决策文本，只输出了思考过程。现在直接给出 "
+                           "规定的 JSON 决策对象(不含 Markdown、不含任何解释)。",
+            }]
+            payload = dict(payload, messages=[*payload["messages"], *correction])
+            response = transport(payload)
+            message = response["choices"][0]["message"]
+            content = message.get("content") or ""
         if not isinstance(content, str) or not content.strip():
             raise ValueError("model returned empty decision")
         return content
@@ -158,12 +175,13 @@ def create_compactor(transport: Callable[[dict[str, Any]], dict[str, Any]]) -> C
             "model": LLM_MODEL,
             "stream": False,
             "temperature": 0,
-            "max_tokens": 600,
+            "max_tokens": 2048,
             "messages": [{"role": "user", "content": COMPACT_PROMPT + "\n\n" + history_text}],
         }
         response = transport(payload)
         message = response["choices"][0]["message"]
-        content = message.get("content") or message.get("reasoning_content") or ""
+        # 同样只信 content；压缩是纯摘要，不需要推理文本。
+        content = message.get("content") or ""
         if not isinstance(content, str) or not content.strip():
             raise ValueError("compactor returned empty summary")
         return content
