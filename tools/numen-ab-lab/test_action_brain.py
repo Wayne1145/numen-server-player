@@ -506,6 +506,65 @@ class PersistentActionTurnTest(unittest.TestCase):
             self.assertEqual("act-replay-1", goto_call[0]["client_action_id"])
             self.assertFalse(checkpoint.path.exists())
 
+    def test_recover_planned_action_business_failure_feeds_back_to_model(self):
+        # 回归：恢复重发工具时遇到业务失败（如 craft 缺材料、mine 无目标），
+        # 不应抛异常让恢复计数堆积（3 次后清 checkpoint 丢回合），而应把
+        # 失败结果交给模型重新决策——模型看到"缺 2x stick"后转而合成木棍。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = BrainSessionStore(root / "sessions", "ab", "uuid-1")
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            checkpoint.write({
+                "state": "tool_planned",
+                "turn_id": "turn-craft",
+                "user": "合成铁镐",
+                "tool": "craft",
+                "arguments": {"item_id": "minecraft:iron_pickaxe"},
+                "client_action_id": "act-craft-1",
+                "transcript": [
+                    {"role": "user", "content": "合成铁镐"},
+                    {"role": "assistant", "content": '{"type":"tool","name":"craft","arguments":{}}'},
+                ],
+            })
+
+            class CraftFailMcp(FakeMcp):
+                def call(self, name, arguments):
+                    self.calls.append((name, dict(arguments)))
+                    if name == "acquire_control":
+                        return {"lease_id": "lease-1"}
+                    if name == "release_control":
+                        return "released"
+                    if name == "craft" and "iron_pickaxe" in str(arguments):
+                        raise RuntimeError(
+                            "MCP tool call failed: {\"success\":false,\"message\":"
+                            "\"not enough materials for iron_pickaxe — missing: 2x stick\"}")
+                    return {"success": True, "message": "done"}
+
+            mcp = CraftFailMcp()
+            # 模型先看到 craft 失败反馈，再决策合成木棍（这次成功），然后 final
+            answers = iter([
+                '{"type":"tool","name":"craft","arguments":{"item_id":"minecraft:stick"}}',
+                '{"type":"final","content":"先做木棍再合成铁镐"}',
+            ])
+            runtime = ActionBrainRuntime(
+                store=store, checkpoint=checkpoint, mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "craft", "parameters": {}},
+                       {"name": "goto", "parameters": {}}],
+                requires_control={"craft": True, "goto": True},
+                local_tools={},
+                sleep=lambda _: None,
+                max_rounds=8,
+            )
+            result = runtime.recover_turn()
+
+            # 关键断言：没有因 craft 失败崩溃，模型收到失败结果后重新决策
+            self.assertEqual("先做木棍再合成铁镐", result["final"])
+            self.assertFalse(checkpoint.path.exists())
+            # craft 被调用 2 次：重发的 iron_pickaxe（失败）+ 模型迭代的 stick
+            craft_calls = [args for name, args in mcp.calls if name == "craft"]
+            self.assertEqual(2, len(craft_calls))
+
     def test_recover_planned_action_without_client_id_still_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -513,12 +513,23 @@ class ActionBrainRuntime:
                 raise RecoveryRequired("checkpoint has no user request")
             actions: list[dict[str, Any]] = []
             name = tool_name
-            outcome = execute_tool_exact(
-                self.mcp, companion=self.companion, name=name,
-                arguments=arguments,
-                requires_control=self.requires_control.get(name, False), sleep=self.sleep,
-                client_action_id=client_action_id,
-            )
+            try:
+                outcome = execute_tool_exact(
+                    self.mcp, companion=self.companion, name=name,
+                    arguments=arguments,
+                    requires_control=self.requires_control.get(name, False), sleep=self.sleep,
+                    client_action_id=client_action_id,
+                )
+                terminal = outcome.get("terminal")
+            except RuntimeError as exc:
+                # 业务失败（如 craft 缺材料、mine 无目标）不是系统错误：把失败
+                # 结果交还给模型重新决策，而不是抛异常让恢复计数堆积 →
+                # 3 次后清 checkpoint 丢回合。模型看到"缺 2x stick"后会转而
+                # 合成木棍/砍树，再回来合成铁镐——长线任务的关键迭代路径。
+                failure = {"success": False, "message": str(exc)}
+                outcome = {"dispatch": failure, "task_id": None,
+                           "terminal": failure, "samples": []}
+                terminal = failure
             actions.append({"tool": name, **outcome})
             tool_content = json.dumps(
                 compact_tool_outcome(name, outcome), ensure_ascii=False, sort_keys=True
@@ -531,7 +542,7 @@ class ActionBrainRuntime:
                 "state": "tool_completed", "turn_id": turn_id,
                 "user": user_content, "tool": name, "task_id": outcome["task_id"],
                 "client_action_id": client_action_id,
-                "terminal": outcome["terminal"], "transcript": transient,
+                "terminal": terminal, "transcript": transient,
             })
             return self._continue_turn(
                 base=self.store.messages(), transient=transient, actions=actions,
