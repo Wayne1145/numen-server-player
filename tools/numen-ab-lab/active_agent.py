@@ -182,6 +182,35 @@ class ActiveAgent:
         for event in events:
             ctx.inbox.push(event)
         result = ctx.run_turn(message)
+        # 把模型回合的最终回复发回游戏聊天栏，让玩家能直接看到/听到假人回应。
+        # run_turn 返回 {"final": ..., "actions": [...], ...};final 是模型生成的
+        # 中文/自然语言回复(可能含工具执行的总结)。用 MCP send_chat 让假人在
+        # 游戏里说出去。若 final 为空(纯工具回合、无文本回复)则不重复发。
+        final = (result or {}).get("final") or ""
+        if isinstance(final, str) and final.strip():
+            try:
+                # send_chat 是 SERVER_BODY_ACTION，需要控制 lease。
+                # 先 acquire(返回 lease_id) → send_chat → release。
+                lease = ctx.mcp.call("acquire_control", {"companion": ctx.companion})
+                lease_id = (lease or {}).get("lease_id") if isinstance(lease, dict) else None
+                try:
+                    ctx.mcp.call("send_chat", {
+                        "companion": ctx.companion,
+                        "lease_id": lease_id,
+                        "text": final.strip()[:300],
+                    })
+                finally:
+                    if lease_id:
+                        try:
+                            ctx.mcp.call("release_control", {
+                                "companion": ctx.companion, "lease_id": lease_id})
+                        except Exception:
+                            pass
+            except Exception as exc:
+                # 发不出回话不致命——AI 回合仍已执行完，仅提示。
+                import logging
+                logging.getLogger("active_agent").warning(
+                    "send_chat 回写游戏失败: %s", exc)
         self._last_turn[companion] = now
         return result
 
