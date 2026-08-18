@@ -39,35 +39,50 @@ class ParseDecisionTest(unittest.TestCase):
 
 
 class ResilienceTest(unittest.TestCase):
-    def test_ensure_llm_ready_requires_key_for_official_endpoint(self):
+    def test_ensure_llm_ready_requires_key(self):
         import brain_runner
-        original_key = brain_runner.LLM_KEY
-        original_url = brain_runner.LLM_URL
+        import os
+        # ensure_llm_ready 读 os.environ，与真实 systemd 启动一致。
+        old_url = os.environ.get("NUMEN_LLM_URL")
+        old_key = os.environ.get("NUMEN_LLM_KEY")
         try:
-            brain_runner.LLM_KEY = ""
-            brain_runner.LLM_URL = "https://api.deepseek.com/v1/chat/completions"
-            with self.assertRaisesRegex(RuntimeError, "NUMEN_DEEPSEEK_KEY"):
+            os.environ["NUMEN_LLM_URL"] = "https://api.sensenova.com/v1/chat/completions"
+            os.environ["NUMEN_LLM_KEY"] = ""
+            with self.assertRaisesRegex(RuntimeError, "NUMEN_LLM_KEY"):
                 brain_runner.ensure_llm_ready()
 
-            brain_runner.LLM_KEY = "sk-test"
+            os.environ["NUMEN_LLM_KEY"] = "sk-test"
             brain_runner.ensure_llm_ready()  # 有 key 不抛
 
-            brain_runner.LLM_KEY = ""
-            brain_runner.LLM_URL = "http://127.0.0.1:9999/v1"  # 非官方端点(如本地代理)不强制
+            # 未设置任何端点(模块级无外部 URL)不强制要求 key。
+            os.environ["NUMEN_LLM_URL"] = ""
+            os.environ["NUMEN_LLM_KEY"] = ""
             brain_runner.ensure_llm_ready()
         finally:
-            brain_runner.LLM_KEY = original_key
-            brain_runner.LLM_URL = original_url
+            if old_url is None:
+                os.environ.pop("NUMEN_LLM_URL", None)
+            else:
+                os.environ["NUMEN_LLM_URL"] = old_url
+            if old_key is None:
+                os.environ.pop("NUMEN_LLM_KEY", None)
+            else:
+                os.environ["NUMEN_LLM_KEY"] = old_key
 
     def test_llm_headers_carry_bearer_key(self):
         import brain_runner
-        original = brain_runner.LLM_KEY
+        import os
+        old = os.environ.get("NUMEN_LLM_KEY")
         try:
-            brain_runner.LLM_KEY = "sk-abc"
-            brain_runner.LLM_HEADERS = {"Authorization": "Bearer sk-abc"}
+            os.environ["NUMEN_LLM_KEY"] = "sk-abc"
+            # 重新 import 让模块读 env 重建 LLM_HEADERS
+            import importlib
+            importlib.reload(brain_runner)
             self.assertEqual("Bearer sk-abc", brain_runner.LLM_HEADERS["Authorization"])
         finally:
-            brain_runner.LLM_KEY = original
+            if old is None:
+                os.environ.pop("NUMEN_LLM_KEY", None)
+            else:
+                os.environ["NUMEN_LLM_KEY"] = old
 
     def test_mcp_call_raises_on_is_error_result(self):
         client = McpClient()

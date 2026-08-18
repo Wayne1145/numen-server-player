@@ -20,22 +20,25 @@ from persistent_brain import fsync_dir
 
 ROOT = Path(__file__).resolve().parent
 MCP_URL = os.environ.get("NUMEN_MCP_URL", "http://127.0.0.1:25585/mcp")
-MCP_TOKEN = os.environ.get("NUMEN_MCP_TOKEN", "")
+MCP_TOKEN = os.environ.get("NUMEN_MCP_TOKEN", "numen-ab-local-token-2026")
 # 直连 DeepSeek（不再经过本地 api_proxy：避免被注入 HA 家居工具与八千代人格）
 LLM_URL = os.environ.get("NUMEN_LLM_URL", "https://api.deepseek.com/v1/chat/completions")
 LLM_MODEL = os.environ.get("NUMEN_LLM_MODEL", "deepseek-v4-flash")
-LLM_KEY = os.environ.get("NUMEN_DEEPSEEK_KEY", "")
+LLM_KEY = os.environ.get("NUMEN_LLM_KEY", "")
 LLM_HEADERS = {"Authorization": f"Bearer {LLM_KEY}"}
 
 
 def ensure_llm_ready() -> None:
-    """直连 DeepSeek 官方端点必须带 API Key；仅在真实发起模型请求前检查，
-    避免模块导入即失败（单元测试不调用模型）。"""
-    if not LLM_KEY and LLM_URL.startswith("https://api.deepseek.com"):
+    """任意 OpenAI 兼容端点都应当带 API Key；仅在真实发起模型请求前检查，
+    避免模块导入即失败（单元测试不调用模型）。检查读 os.environ，
+    与 systemd 等真实启动环境一致。"""
+    key = os.environ.get("NUMEN_LLM_KEY", "")
+    url = os.environ.get("NUMEN_LLM_URL", "")
+    if not key and url:
         raise RuntimeError(
-            "NUMEN_DEEPSEEK_KEY 环境变量未设置：Numen 大脑已直连 DeepSeek，需要提供 API Key")
+            "NUMEN_LLM_KEY 环境变量未设置：外部模型端点需要提供 API Key")
 RCON_PORT = int(os.environ.get("NUMEN_RCON_PORT", "25586"))
-RCON_PASSWORD = os.environ.get("NUMEN_RCON_PASSWORD", "")
+RCON_PASSWORD = os.environ.get("NUMEN_RCON_PASSWORD", "numen-ab-rcon-2026")
 MAX_ROUNDS = 8
 
 MANAGEMENT_TOOLS = {
@@ -297,9 +300,9 @@ def llm_turn(messages: list[dict[str, str]], system_prompt: str,
     def request_once() -> dict[str, Any]:
         return post_json(LLM_URL, {
             "model": LLM_MODEL, "stream": False, "temperature": 0,
-            "max_tokens": 500,
+            "max_tokens": 2000, "reasoning_effort": "none",
             "messages": [{"role": "system", "content": full_system}, *messages],
-        }, headers=LLM_HEADERS, timeout=150)
+        }, headers=LLM_HEADERS, timeout=120)
 
     response = retry_transient(request_once, attempts=2, delay_seconds=3)
     choice = response["choices"][0]["message"]

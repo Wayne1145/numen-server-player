@@ -67,6 +67,7 @@ def create_model_adapter(transport: Callable[[dict[str, Any]], dict[str, Any]],
             "stream": False,
             "temperature": 0,
             "max_tokens": 512,
+            "reasoning_effort": "none",
             "messages": [
                 {"role": "system", "content": persona_block + SYSTEM_PROMPT
                  + "\n<available_tools>" + tool_text + "</available_tools>"},
@@ -178,6 +179,7 @@ def create_compactor(transport: Callable[[dict[str, Any]], dict[str, Any]]) -> C
             "stream": False,
             "temperature": 0,
             "max_tokens": 512,
+            "reasoning_effort": "none",
             "messages": [{"role": "user", "content": COMPACT_PROMPT + "\n\n" + history_text}],
         }
         response = transport(payload)
