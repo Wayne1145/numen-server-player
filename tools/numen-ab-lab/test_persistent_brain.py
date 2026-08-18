@@ -128,6 +128,32 @@ class BrainSessionStoreTest(unittest.TestCase):
             self.assertTrue(reopened.has_transaction("turn-1"))
             self.assertEqual(batch, reopened.messages())
 
+    def test_broken_tool_examples_are_scrubbed_from_model_view(self):
+        # 回归：历史里残留 scan_blocks/locate_biome/locate_structure 的调用样例，
+        # 模型会模仿它们（few-shot），即使工具列表已剔除。messages() 视图应把
+        # 这些消息替换为中性说明，磁盘原样保留。
+        with tempfile.TemporaryDirectory() as tmp:
+            store = BrainSessionStore(Path(tmp), "ab-server", "companion")
+            store.append_batch([
+                {"role": "user", "content": "找棵树"},
+                {"role": "assistant",
+                 "content": '{"type":"tool","name":"scan_blocks","arguments":{"block_ids":["minecraft:oak_log"],"radius":64}}'},
+                {"role": "user",
+                 "content": '<tool_result name="scan_blocks">{"dispatch":{"message":"action queued"}}'},
+                {"role": "assistant", "content": '{"type":"tool","name":"mine","arguments":{"block_ids":["minecraft:oak_log"],"count":5}}'},
+            ])
+
+            visible = store.messages()
+            self.assertEqual(4, len(visible))
+            # 断链工具样例被替换为中性说明
+            self.assertIn("已停用", visible[1]["content"])
+            self.assertIn("不可用", visible[2]["content"])
+            # 正常工具样例保留
+            self.assertIn("mine", visible[3]["content"])
+            # 磁盘原样保留（视图清洗不落盘）
+            raw = store.path.read_text(encoding="utf-8")
+            self.assertIn("scan_blocks", raw)
+
     def test_append_pair_is_one_transaction_record_never_half_turn(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = BrainSessionStore(Path(tmp), "ab-server", "companion")

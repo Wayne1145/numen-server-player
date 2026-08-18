@@ -228,6 +228,7 @@ class ActionBrainRuntime:
                 base=base, transient=transient, actions=[], turn_id=turn_id,
                 user_content=user_content, start_round=1,
                 mark_side_effect=lambda: None,
+                empty_result_cap=self.empty_result_cap,
             )
         except BaseException:
             current = self.checkpoint.read()
@@ -255,6 +256,7 @@ class ActionBrainRuntime:
         避免模型在"永远填不满的反馈黑洞"里无限重试。
         """
         consecutive_empty = 0
+        unavailable_budget = 0
         for number in range(start_round, self.max_rounds + 1):
                 correction: list[dict[str, str]] = []
                 decision = None
@@ -318,7 +320,32 @@ class ActionBrainRuntime:
                 name = decision["name"]
                 available = name in self.requires_control or name in self.local_tools
                 if not available:
-                    raise ValueError(f"tool not available: {name}")
+                    # 模型从历史会话学到的旧工具名（如 scan_blocks/locate_biome），
+                    # 本服已从可见列表剔除（异步断链）。崩溃会毁掉整个回合，
+                    # 正确做法是给模型一句可读的纠正反馈，让它改用替代工具继续。
+                    # 连续不可用超过 3 次视为模型无法收敛，直接 final 收束。
+                    if unavailable_budget is None:
+                        unavailable_budget = 0
+                    unavailable_budget += 1
+                    correction.append({
+                        "role": "user",
+                        "content": (
+                            f"工具 {name} 在当前服务器不可用（已停用/不在可用列表）。"
+                            "请改用以下可用替代：找方块/资源用 mine（自带寻路挖掘计数，"
+                            "block_ids 传方块 id 列表）；看视野用 look_around；找实体用 "
+                            "scan_nearby_entities；移动用 goto。不要重复调用不可用工具。"
+                        ),
+                    })
+                    if unavailable_budget >= 3:
+                        unavailable_final = (
+                            f"已连续 {unavailable_budget} 次尝试调用不可用工具（含 {name}），"
+                            "当前服务器工具集不包含它。为避免空转，我先停下汇报："
+                            "请改用 mine / look_around / scan_nearby_entities 完成目标。"
+                        )
+                        transient.append({"role": "assistant", "content": unavailable_final})
+                        return {"final": unavailable_final, "actions": actions,
+                                "rounds": number, "early_final": "unavailable_tool_cap"}
+                    continue
                 serialized_decision = json.dumps(decision, ensure_ascii=False, sort_keys=True)
                 transient.append({"role": "assistant", "content": serialized_decision})
                 if name in self.local_tools:

@@ -165,7 +165,18 @@ class BrainSessionStore:
         return None
 
     def messages(self) -> list[dict[str, str]]:
-        """模型可见视图：最近摘要(system) + 其后全部消息。"""
+        """模型可见视图：最近摘要(system) + 其后全部消息。
+
+        视图级清洗：历史里可能残留已停用/断链工具的调用样例（scan_blocks /
+        locate_biome / locate_structure 在本服返回排队占位包，结果不可用）。
+        模型会从这些 few-shot 样例里模仿调用，即使工具列表已剔除。这里把它们
+        替换成中性说明，防止历史污染再次诱导模型调用不可用工具。
+        """
+        BROKEN_TOOL_NAMES = ("scan_blocks", "locate_biome", "locate_structure")
+        BROKEN_RE = re.compile(
+            r'("name"\s*:\s*"(scan_blocks|locate_biome|locate_structure)")')
+        BROKEN_RESULT_RE = re.compile(
+            r'<tool_result name="(scan_blocks|locate_biome|locate_structure)">')
         start = 0
         for index, record in enumerate(self._records):
             if record.get("type") == "summary":
@@ -175,7 +186,16 @@ class BrainSessionStore:
         if summary_text is not None:
             visible.append({"role": "system", "content": summary_text})
         for record in self._records[start:]:
-            visible.append({"role": record["role"], "content": record["content"]})
+            role = record["role"]
+            content = record["content"]
+            # 助手旧工具调用决策：替换为中性说明
+            if role == "assistant" and BROKEN_RE.search(content):
+                content = ("（历史回合曾尝试调用已停用的感知工具，其结果不可用；"
+                           "当前请使用 mine / look_around / scan_nearby_entities。）")
+            # 对应的工具结果消息：同样替换
+            if role == "user" and BROKEN_RESULT_RE.search(content):
+                content = "<tool_result>(该工具已停用，结果不可用)</tool_result>"
+            visible.append({"role": role, "content": content})
         return visible
 
     def should_compact(self, max_messages: int = 60, max_chars: int = 18000) -> bool:

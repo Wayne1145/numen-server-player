@@ -271,12 +271,20 @@ def tool_requires_control(schema: dict[str, Any]) -> bool:
 
 
 def model_tools(live_tools: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, bool]]:
+    # 正式服断链工具：这些是异步工具，但 actuator 同步路径不等待回调，
+    # 永远返回 "action queued" 占位包且无 task_id（结果被丢弃）。模型拿不到
+    # 任何反馈，只会空转。因此从模型可见列表剔除，避免被误导调用。
+    # 替代品全部同步可用：look_around（视野）、scan_nearby_entities（实体）、
+    # mine/goto/melee_attack（带 task_id 可等待）。后续 mod 修复后在此恢复。
+    BROKEN_TOOLS = {"scan_blocks", "locate_biome", "locate_structure"}
     visible: list[dict[str, Any]] = []
     control: dict[str, bool] = {}
     seen: set[str] = set()
     for tool in live_tools:
         name = tool["name"]
         if name in MANAGEMENT_TOOLS:
+            continue
+        if name in BROKEN_TOOLS:
             continue
         if name in seen:
             raise ValueError(f"duplicate tool name from server: {name}")

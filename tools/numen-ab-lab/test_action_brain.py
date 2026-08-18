@@ -34,6 +34,19 @@ class FakeMcp:
         return {"success": True}
 
 
+class NeverCalledMcp:
+    """模拟服务器：可用工具在 requires_control 之外不存在（模型误调旧工具名）。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def call(self, name, arguments):
+        self.calls.append((name, dict(arguments)))
+        if name == "acquire_control":
+            return {"lease_id": "lease-1"}
+        return {"success": True}
+
+
 class CompanionBindingTest(unittest.TestCase):
     def test_only_one_process_lock_can_own_a_companion_brain(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -312,6 +325,70 @@ class PersistentActionTurnTest(unittest.TestCase):
             # 至多 dispatch 了 2 次（达到阈值即停），没有无限重试
             scan_calls = [c for c in mcp.calls if c[0] == "scan_blocks"]
             self.assertLessEqual(len(scan_calls), 2)
+
+    def test_unavailable_tool_gets_correction_feedback_not_crash(self):
+        # 回归：模型从历史会话学到已停用工具名（scan_blocks 等）并继续调用，
+        # 运行时不应崩溃（此前 raise ValueError 毁掉整个回合），而应给模型
+        # 一句可读的纠正反馈并让它换工具；连续 3 次仍不可用则 early_final。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = BrainSessionStore(root / "sessions", "ab", "uuid-1")
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            mcp = NeverCalledMcp()
+            # 模型第一轮调已停用工具 scan_blocks，第二轮改调可用工具 mine
+            answers = iter([
+                '{"type":"tool","name":"scan_blocks","arguments":{"block_ids":["minecraft:oak_log"],"radius":64}}',
+                '{"type":"tool","name":"mine","arguments":{"block_ids":["minecraft:oak_log"],"count":5}}',
+                '{"type":"final","content":"砍树完成"}',
+            ])
+
+            runtime = ActionBrainRuntime(
+                store=store, checkpoint=checkpoint, mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "mine", "parameters": {}}],
+                requires_control={"mine": True},
+                local_tools={},
+                sleep=lambda _: None,
+                max_rounds=8,
+                empty_result_cap=2,
+            )
+            result = runtime.run_turn("帮我砍树")
+
+            # 关键断言：回合没有崩溃，模型收到纠正后改用 mine 完成任务
+            self.assertNotIn("early_final", result)
+            self.assertEqual("砍树完成", result["final"])
+            self.assertFalse(checkpoint.path.exists())
+            mine_calls = [c for c in mcp.calls if c[0] == "mine"]
+            self.assertEqual(len(mine_calls), 1)
+
+    def test_unavailable_tool_cap_after_3_attempts(self):
+        # 模型连续 3 次调用不可用工具 → 不应无限空转，直接 early_final 收束。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = BrainSessionStore(root / "sessions", "ab", "uuid-2")
+            checkpoint = TurnCheckpoint(root / "checkpoint.json")
+            mcp = NeverCalledMcp()
+            answers = iter([
+                '{"type":"tool","name":"scan_blocks","arguments":{}}',
+                '{"type":"tool","name":"scan_blocks","arguments":{}}',
+                '{"type":"tool","name":"scan_blocks","arguments":{}}',
+            ])
+
+            runtime = ActionBrainRuntime(
+                store=store, checkpoint=checkpoint, mcp=mcp, companion="ABBrain",
+                model=lambda _messages, _tools: next(answers),
+                tools=[{"name": "mine", "parameters": {}}],
+                requires_control={"mine": True},
+                local_tools={},
+                sleep=lambda _: None,
+                max_rounds=8,
+                empty_result_cap=2,
+            )
+            result = runtime.run_turn("帮我砍树")
+
+            self.assertEqual("unavailable_tool_cap", result.get("early_final"))
+            self.assertFalse(checkpoint.path.exists())
+            self.assertIn("不可用", result["final"])
 
     def test_write_action_injects_client_action_id(self):
         mcp = FakeMcp([{"state": "done", "task_id": "t9", "result": {"success": True}}])
