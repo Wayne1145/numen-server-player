@@ -84,6 +84,15 @@ def create_model_adapter(transport: Callable[[dict[str, Any]], dict[str, Any]],
     persona_block = (persona + "\n\n") if persona else ""
     def model(messages: list[dict[str, str]], tools: list[dict[str, Any]]) -> str:
         tool_text = json.dumps(tools, ensure_ascii=False, separators=(",", ":"))
+        # 恢复旧 checkpoint 时不会再次经过新任务入口，因此在模型可见历史上也做幂等增强。
+        # 工具回执同样是 user role，必须排除，避免把回执里的自然语言误当新任务。
+        model_messages = [
+            dict(message, content=enrich_task_message(message.get("content", "")))
+            if message.get("role") == "user"
+            and not str(message.get("content", "")).lstrip().startswith("<tool_result")
+            else message
+            for message in messages
+        ]
         payload = {
             "model": LLM_MODEL,
             "stream": False,
@@ -93,7 +102,7 @@ def create_model_adapter(transport: Callable[[dict[str, Any]], dict[str, Any]],
             "messages": [
                 {"role": "system", "content": persona_block + SYSTEM_PROMPT
                  + "\n<available_tools>" + tool_text + "</available_tools>"},
-                *messages,
+                *model_messages,
             ],
         }
         response = transport(payload)
@@ -170,6 +179,8 @@ def make_world_memory_tools(store: Any) -> dict[str, Callable[[dict[str, Any]], 
 
 def enrich_task_message(message: str) -> str:
     """为需要后续加工的请求注入强制前置，避免弱模型先深入采集再补设施。"""
+    if "<mandatory_prerequisites>" in message:
+        return message
     smelting_terms = ("熔炼", "熔成", "烧成", "烧制", "冶炼", "smelt")
     if not any(term in message.lower() for term in smelting_terms):
         return message

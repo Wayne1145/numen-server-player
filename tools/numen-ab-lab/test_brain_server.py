@@ -104,7 +104,11 @@ class BrainServerTest(unittest.TestCase):
 
         class Inbox:
             def read(self):
-                return []
+                return [{
+                    "kind": "chat",
+                    "source": "Wayne9929",
+                    "detail": "@yachiyo 帮我挖15个铁，烧成铁锭",
+                }]
 
             def clear(self):
                 pass
@@ -116,7 +120,7 @@ class BrainServerTest(unittest.TestCase):
             context.store = Store()
             context.runtime = Runtime()
             context.inbox = Inbox()
-            result = CompanionContext.run_turn(context, "帮我挖15个铁，烧成铁锭")
+            result = CompanionContext.run_turn(context, "请根据玩家的新消息自主完成任务")
 
         self.assertEqual("完成", result["final"])
         self.assertIn("mandatory_prerequisites", context.runtime.message)

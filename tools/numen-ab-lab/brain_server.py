@@ -116,7 +116,7 @@ class CompanionContext:
                         compact_history(self.store, create_compactor(live_transport))
                     before = len(self.store.messages())
                     result = self.runtime.run_turn(
-                        attach_events(enrich_task_message(message), self.inbox.read()))
+                        enrich_task_message(attach_events(message, self.inbox.read())))
                     self.inbox.clear()
                     return {"final": result["final"], "actions": result["actions"],
                             "history_before": before, "history_after": len(self.store.messages())}

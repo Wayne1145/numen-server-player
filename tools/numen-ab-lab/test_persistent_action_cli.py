@@ -87,6 +87,7 @@ class PersistentActionCliTest(unittest.TestCase):
         self.assertIn("禁止先采目标矿", enriched)
         self.assertIn("最终产物必须保留在背包", enriched)
         self.assertIn("不得 drop_items", enriched)
+        self.assertEqual(enriched, enrich_task_message(enriched), "重复入口/恢复必须幂等")
         self.assertEqual("帮我挖15个铁", enrich_task_message("帮我挖15个铁"))
 
     def test_compactor_sends_single_user_message_with_history(self):
@@ -148,6 +149,25 @@ class PersistentActionCliTest(unittest.TestCase):
         self.assertIn("task_id", observed["messages"][0]["content"])
         self.assertIn("不得把 idle 当作成功", observed["messages"][0]["content"])
         self.assertIn("最终产物保留在背包", observed["messages"][0]["content"])
+
+    def test_model_adapter_enriches_original_task_again_during_checkpoint_recovery(self):
+        observed = {}
+
+        def transport(payload):
+            observed.update(payload)
+            return {"choices": [{"message": {"content": '{"type":"final","content":"好"}'}}]}
+
+        adapter = create_model_adapter(transport)
+        adapter([
+            {"role": "user", "content": "帮我挖15个铁，烧成铁锭"},
+            {"role": "assistant", "content": '{"type":"tool","name":"mine","arguments":{}}'},
+            {"role": "user", "content": '<tool_result name="mine">烧成提示只属于回执</tool_result>'},
+        ], [])
+        task = observed["messages"][1]["content"]
+        tool_result = observed["messages"][3]["content"]
+        self.assertIn("mandatory_prerequisites", task)
+        self.assertEqual(1, task.count("<mandatory_prerequisites>"))
+        self.assertNotIn("mandatory_prerequisites", tool_result)
 
     def test_model_adapter_rejects_empty_response(self):
         adapter = create_model_adapter(
