@@ -29,6 +29,7 @@ from persistent_action_cli import (
     compact_history,
     create_compactor,
     create_model_adapter,
+    enrich_task_message,
     live_transport,
     load_persona,
     make_load_skill,
@@ -114,7 +115,8 @@ class CompanionContext:
                                                  max_chars=COMPACT_MAX_CHARS):
                         compact_history(self.store, create_compactor(live_transport))
                     before = len(self.store.messages())
-                    result = self.runtime.run_turn(attach_events(message, self.inbox.read()))
+                    result = self.runtime.run_turn(
+                        attach_events(enrich_task_message(message), self.inbox.read()))
                     self.inbox.clear()
                     return {"final": result["final"], "actions": result["actions"],
                             "history_before": before, "history_after": len(self.store.messages())}

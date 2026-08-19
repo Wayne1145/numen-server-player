@@ -58,8 +58,13 @@ SYSTEM_PROMPT = """你是一个与 Minecraft Numen 真实玩家身体长期绑�
 - 移动：goto 带 x+z 到目的地；要走到某方块旁用 goto(block=方块id)。
 - 打怪：scan_nearby_entities 拿怪物 entity_id → melee_attack(entity_ids=[...])。
 - 长任务（砍树/挖矿/盖房等）会跨多轮：每轮调用一个工具，拿到结果后继续下一步，
-  直到目标完成才 final。中途遇到意外（被怪打、掉血、天黑）要优先应对：先保命
+  直到目标完成才 final。复合任务先准备后续阶段的关键前置：若目标包含熔炼/加工，
+  先确保工作台（或原木/木板）、炉子（或8圆石）和燃料，再深入采集目标资源，
+  避免拿到矿后才从深处远途返回补加工设施。
+  中途遇到意外（被怪打、掉血、天黑）要优先应对：先保命
   （逃跑/进食/反击），再继续任务，最后在 final 里说明发生了什么。
+- 用户要求采集、制作或熔炼的最终产物保留在背包。除非用户明确要求丢下、交付或存入容器，
+  不得对最终成果调用 drop_items；完成后用 get_self_status 核验数量并直接 final。
 - 玩家点你名给任务 → 执行；纯聊天问候 → 简短回应即可。"""
 
 
@@ -161,6 +166,23 @@ def make_world_memory_tools(store: Any) -> dict[str, Callable[[dict[str, Any]], 
         return {"success": True, "blocks": blocks}
 
     return {"remember_block": remember_block, "recall_blocks": recall_blocks}
+
+
+def enrich_task_message(message: str) -> str:
+    """为需要后续加工的请求注入强制前置，避免弱模型先深入采集再补设施。"""
+    smelting_terms = ("熔炼", "熔成", "烧成", "烧制", "冶炼", "smelt")
+    if not any(term in message.lower() for term in smelting_terms):
+        return message
+    return """<mandatory_prerequisites>
+这是“采集后熔炼/加工”任务。禁止先采目标矿。首次资源动作前必须先确认并准备：
+1. 工作台，或制作工作台所需的原木/木板；
+2. 炉子，或制作炉子所需的8个圆石；
+3. 足够燃料（煤/木炭/可燃木料）。
+只有上述加工链已在背包或可达位置落实，才开始采目标矿。没有合格近战武器时不要 melee_attack，先逃离。
+最终产物必须保留在背包；除非用户明确要求交付，否则不得 drop_items 最终成果。完成后用 get_self_status 核验数量并 final。
+</mandatory_prerequisites>
+
+""" + message
 
 
 def attach_events(message: str, events: list[dict[str, Any]]) -> str:
@@ -274,7 +296,7 @@ def main() -> None:
                 max_messages=COMPACT_MAX_MESSAGES, max_chars=COMPACT_MAX_CHARS):
             compact_history(store, create_compactor(live_transport))
         if not args.recover:
-            user_message = attach_events(args.message, inbox.read())
+            user_message = attach_events(enrich_task_message(args.message), inbox.read())
         else:
             user_message = args.message
         result = runtime.recover_turn() if args.recover else runtime.run_turn(user_message)

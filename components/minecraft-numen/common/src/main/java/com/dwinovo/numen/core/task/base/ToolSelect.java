@@ -72,6 +72,14 @@ public final class ToolSelect {
         }
     }
 
+    /** 是否至少携带一件可由战斗策略使用的合法近战武器。 */
+    public static boolean hasCombatWeapon(Iterable<ItemStack> stacks) {
+        for (ItemStack stack : stacks) {
+            if (combatWeaponDamage(stack) > 0.0) return true;
+        }
+        return false;
+    }
+
     /**
      * The flat main-hand attack damage an item grants. A block or food scores 0,
      * so it is never chosen over a real weapon.

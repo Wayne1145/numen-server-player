@@ -134,9 +134,11 @@ class SurvivalDecisionsTest {
     }
 
     @Test
-    void priorityRankingIsMlgOverMobOverFoodOverUnstuckOverLlm() {
+    void criticalFoodRegenOutranksMobDefenseSoAnUnarmedFleeingBodyCanFinishEating() {
         assertTrue(SurvivalDecisions.MLG_PRIORITY > SurvivalDecisions.MOB_DEFENSE_PRIORITY);
-        assertTrue(SurvivalDecisions.MOB_DEFENSE_PRIORITY > SurvivalDecisions.FOOD_REGEN_PRIORITY);
+        assertTrue(SurvivalDecisions.BREATH_PRIORITY > SurvivalDecisions.FOOD_REGEN_PRIORITY);
+        assertTrue(SurvivalDecisions.FOOD_REGEN_PRIORITY > SurvivalDecisions.MOB_DEFENSE_PRIORITY);
+        assertTrue(SurvivalDecisions.MOB_DEFENSE_PRIORITY > SurvivalDecisions.FOOD_HUNGER_PRIORITY);
         assertTrue(SurvivalDecisions.FOOD_REGEN_PRIORITY > SurvivalDecisions.FOOD_HUNGER_PRIORITY);
         assertTrue(SurvivalDecisions.FOOD_HUNGER_PRIORITY > SurvivalDecisions.UNSTUCK_PRIORITY);
         assertTrue(SurvivalDecisions.UNSTUCK_PRIORITY > TaskChain.LLM_BASE_PRIORITY);

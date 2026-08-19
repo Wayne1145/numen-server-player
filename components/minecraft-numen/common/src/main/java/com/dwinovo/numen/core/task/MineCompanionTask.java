@@ -310,7 +310,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 // body to the ore; digging it is THIS task's job (with this task's
                 // bookkeeping), so the path may not consume the objective on the way.
                 nav = PlayerNav.to(player, this::oreFieldCompiled, MINE_SPEED,
-                        () -> reachableTarget() != null);
+                        () -> shouldInterruptNavigation(!drops.isEmpty(), reachableTarget() != null));
                 nav.setHighlights(() -> new ArrayList<>(knownOres));   // box every known target
                 navIsBranch = false;
             }
@@ -861,6 +861,15 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 纯策略钉桩：路径执行器的活性时钟达到上限后必须收束。 */
     static boolean navigationStalled(int stallTicks) {
         return stallTicks >= MAX_NAV_STALL_TICKS;
+    }
+
+    /**
+     * 有待拾取目标掉落时，下一块可直接挖的矿不能中断掉落导航；否则每 tick
+     * 都会重建导航、stall 时钟清零，而上层又因掉落未捡拒绝继续挖矿。
+     */
+    static boolean shouldInterruptNavigation(boolean targetDropPending,
+                                             boolean reachableOreAvailable) {
+        return !targetDropPending && reachableOreAvailable;
     }
 
     /** Terminal "nothing gathered, no ore left to go for" failure, distinguishing a

@@ -35,4 +35,11 @@ class MineCompanionTaskSafetyTest {
         assertFalse(MineCompanionTask.navigationStalled(199));
         assertTrue(MineCompanionTask.navigationStalled(200));
     }
+
+    @Test
+    void reachableOreCannotInterruptNavigationWhileATargetDropIsPending() {
+        assertFalse(MineCompanionTask.shouldInterruptNavigation(true, true));
+        assertTrue(MineCompanionTask.shouldInterruptNavigation(false, true));
+        assertFalse(MineCompanionTask.shouldInterruptNavigation(false, false));
+    }
 }

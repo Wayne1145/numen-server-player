@@ -10,6 +10,7 @@ from persistent_action_cli import (
     load_persona,
     make_load_skill,
     make_world_memory_tools,
+    enrich_task_message,
 )
 
 
@@ -77,6 +78,17 @@ class PersistentActionCliTest(unittest.TestCase):
         self.assertIn("去砍树", merged)
         self.assertEqual("去砍树", attach_events("去砍树", []))
 
+    def test_smelting_request_injects_mandatory_processing_prerequisites(self):
+        enriched = enrich_task_message("帮我挖15个铁，烧成铁锭")
+        self.assertIn("mandatory_prerequisites", enriched)
+        self.assertIn("工作台", enriched)
+        self.assertIn("炉子", enriched)
+        self.assertIn("燃料", enriched)
+        self.assertIn("禁止先采目标矿", enriched)
+        self.assertIn("最终产物必须保留在背包", enriched)
+        self.assertIn("不得 drop_items", enriched)
+        self.assertEqual("帮我挖15个铁", enrich_task_message("帮我挖15个铁"))
+
     def test_compactor_sends_single_user_message_with_history(self):
         observed = {}
 
@@ -135,6 +147,7 @@ class PersistentActionCliTest(unittest.TestCase):
         self.assertIn("<available_tools>", observed["messages"][0]["content"])
         self.assertIn("task_id", observed["messages"][0]["content"])
         self.assertIn("不得把 idle 当作成功", observed["messages"][0]["content"])
+        self.assertIn("最终产物保留在背包", observed["messages"][0]["content"])
 
     def test_model_adapter_rejects_empty_response(self):
         adapter = create_model_adapter(

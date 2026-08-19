@@ -3,6 +3,7 @@ package com.dwinovo.numen.core.task;
 import com.dwinovo.numen.core.pathing.calc.NavGoal;
 import com.dwinovo.numen.core.pathing.exec.PlayerNav;
 import com.dwinovo.numen.core.task.base.AbstractCompanionTask;
+import com.dwinovo.numen.core.task.base.Precondition;
 import com.dwinovo.numen.core.task.base.ToolSelect;
 import com.dwinovo.numen.entity.InputDriver;
 import com.dwinovo.numen.entity.NumenPlayer;
@@ -63,6 +64,16 @@ public final class MeleeAttackCompanionTask extends AbstractCompanionTask<MeleeA
 
     public MeleeAttackCompanionTask(NumenPlayer player, MeleeAttackTaskRecord record) {
         super(player, record);
+    }
+
+    @Override
+    protected List<Precondition> preconditions() {
+        return List.of(() -> ToolSelect.hasCombatWeapon(player.getInventory().items)
+                ? null
+                : new Precondition.Failure(
+                        "no eligible melee weapon in inventory; pickaxes, shovels and hoes are"
+                                + " protected production tools — flee or acquire a sword/axe first",
+                        FailureType.WRONG_TOOL));
     }
 
     @Override

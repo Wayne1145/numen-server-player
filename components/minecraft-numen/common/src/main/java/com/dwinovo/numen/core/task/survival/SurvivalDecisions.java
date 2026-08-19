@@ -16,7 +16,7 @@ import com.dwinovo.numen.task.TaskChain;
  * mob is next; hunger (a slow drain) next; being stuck (annoying, not lethal) is
  * the lowest survival concern and must never outrank fighting or eating. All sit
  * above the LLM base (0) so any firing survival concern preempts the task:
- * <pre>  MLG(10) &gt; breath(6) &gt; mob-defense(5) &gt; food-regen(4) &gt; food-hunger(3) &gt; unstuck(2) &gt; llm(0)</pre>
+ * <pre>  MLG(10) &gt; breath(6) &gt; food-regen(5.5) &gt; mob-defense(5) &gt; food-hunger(3) &gt; unstuck(2) &gt; llm(0)</pre>
  */
 public final class SurvivalDecisions {
 
@@ -29,7 +29,12 @@ public final class SurvivalDecisions {
     /** Above mob-defense: drowning is a hard timer — surface first, fight after. */
     public static final float BREATH_PRIORITY = 6.0f;
     public static final float MOB_DEFENSE_PRIORITY = 5.0f;
-    public static final float FOOD_REGEN_PRIORITY = 4.0f;
+    /**
+     * 低血恢复必须略高于怪物防卫：否则无武器身体会一直被防卫链占用逃跑，
+     * 即使背包有食物也永远吃不完，最终被远程怪持续击杀。仅低血恢复用此档；
+     * 普通饥饿仍低于防卫。
+     */
+    public static final float FOOD_REGEN_PRIORITY = 5.5f;
     public static final float FOOD_HUNGER_PRIORITY = 3.0f;
     public static final float UNSTUCK_PRIORITY = 2.0f;
     // ---- food thresholds (vanilla FoodData is 0..20) ----

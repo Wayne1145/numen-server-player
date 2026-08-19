@@ -1,11 +1,12 @@
 import json
 import tempfile
+import threading
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-from brain_server import BrainServer
+from brain_server import BrainServer, CompanionContext
 
 
 class StubContext:
@@ -84,6 +85,43 @@ class BrainServerTest(unittest.TestCase):
         self.assertEqual("完成", body["final"])
         self.assertEqual(("turn", "去砍树"), self.context.resolved)
         self.assertEqual("yachiyo", self.context.factory_persona)
+
+    def test_companion_context_enriches_smelting_request_for_active_agent(self):
+        class Store:
+            def should_compact(self, **_kwargs):
+                return False
+
+            def messages(self):
+                return []
+
+        class Runtime:
+            def __init__(self):
+                self.message = None
+
+            def run_turn(self, message):
+                self.message = message
+                return {"final": "完成", "actions": []}
+
+        class Inbox:
+            def read(self):
+                return []
+
+            def clear(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as tmp:
+            context = object.__new__(CompanionContext)
+            context.lock = threading.Lock()
+            context.lock_path = Path(tmp) / "companion.lock"
+            context.store = Store()
+            context.runtime = Runtime()
+            context.inbox = Inbox()
+            result = CompanionContext.run_turn(context, "帮我挖15个铁，烧成铁锭")
+
+        self.assertEqual("完成", result["final"])
+        self.assertIn("mandatory_prerequisites", context.runtime.message)
+        self.assertIn("禁止先采目标矿", context.runtime.message)
+        self.assertIn("最终产物必须保留在背包", context.runtime.message)
 
     def test_recover_endpoint(self):
         status, body = self._request("/v1/recover", method="POST", body={
