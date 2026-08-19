@@ -84,6 +84,8 @@ public final class NumenCore {
     private static void registerChains() {
         com.dwinovo.numen.task.BrainChains.register(10,
                 bodyLog -> new com.dwinovo.numen.core.task.chain.UnstuckChain());
+        com.dwinovo.numen.task.BrainChains.register(15,
+                com.dwinovo.numen.core.task.chain.DamageEscapeChain::new);
         com.dwinovo.numen.task.BrainChains.register(20,
                 com.dwinovo.numen.core.task.chain.MobDefenseChain::new);
         com.dwinovo.numen.task.BrainChains.register(30,

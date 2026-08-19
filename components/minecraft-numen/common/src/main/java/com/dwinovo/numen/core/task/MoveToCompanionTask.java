@@ -203,8 +203,14 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
      * "one block short, one step too far" fall.
      */
     private boolean reached() {
-        return inGoalCell(feet())
+        return stablePhysicalArrival(player.onGround(), player.isInWater(), player.onClimbable())
+                && inGoalCell(feet())
                 && inGoalCell(com.dwinovo.numen.core.pathing.moves.Movement.pathStart(player));
+    }
+
+    /** 地面、水中或梯子上才是可稳定交付的物理终态；纯自由落体不是。 */
+    static boolean stablePhysicalArrival(boolean onGround, boolean inWater, boolean onClimbable) {
+        return onGround || inWater || onClimbable;
     }
 
     /** ONE membership definition per kind, shared with the search:

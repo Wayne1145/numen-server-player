@@ -26,6 +26,8 @@ public final class SurvivalDecisions {
 
     // ---- priority magnitudes (all > LLM_BASE_PRIORITY = 0) ----
     public static final float MLG_PRIORITY = 10.0f;
+    /** 环境持续伤害是即时生命威胁，仅低于空中坠落救援。 */
+    public static final float DAMAGE_ESCAPE_PRIORITY = 8.0f;
     /** Above mob-defense: drowning is a hard timer — surface first, fight after. */
     public static final float BREATH_PRIORITY = 6.0f;
     public static final float MOB_DEFENSE_PRIORITY = 5.0f;

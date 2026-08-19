@@ -78,6 +78,11 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
      * instead of running {@link #onTick()}.
      */
     private TaskState pendingTerminal;
+    /** 所有长任务共享的生命基线；任务过程中显著失血必须把身体交还安全层。 */
+    private float taskStartHealth;
+    private float lowestObservedHealth = Float.POSITIVE_INFINITY;
+    static final float UNSAFE_HEALTH_FLOOR = 8.0f;
+    static final float MAX_TASK_HEALTH_LOSS = 6.0f;
 
     // ---- sub-task composition state (see runChild) ----
     /** The child sub-goal currently being delegated to, or {@code null}. */
@@ -96,6 +101,8 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
 
     @Override
     public final void start() {
+        taskStartHealth = player.getHealth();
+        lowestObservedHealth = taskStartHealth;
         for (Precondition p : preconditions()) {
             Precondition.Failure f = p.check();
             if (f != null) {
@@ -119,7 +126,29 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
     @Override
     public final TaskState tick() {
         if (pendingTerminal != null) return pendingTerminal;
+        float currentHealth = player.getHealth();
+        lowestObservedHealth = Math.min(lowestObservedHealth, currentHealth);
+        if (unsafeTaskHealth(taskStartHealth, lowestObservedHealth)) {
+            fail("HAZARD: health fell as low as " + lowestObservedHealth + "/" + player.getMaxHealth()
+                            + " HP during this task (started at " + taskStartHealth
+                            + "); stopped before more environmental or combat damage",
+                    FailureType.HAZARD);
+            InputDriver.stop(player);
+            return TaskState.FAILED;
+        }
         return onTick();
+    }
+
+    /** 被本能抢占期间也记录最低生命，防止回血后掩盖任务曾经历的危险。 */
+    @Override
+    public final void observeBody(NumenPlayer observed) {
+        lowestObservedHealth = Math.min(lowestObservedHealth, observed.getHealth());
+    }
+
+    /** 纯策略：低血或单任务累计损失过大，任何身体任务都必须停止。 */
+    static boolean unsafeTaskHealth(float startHealth, float currentHealth) {
+        return currentHealth <= UNSAFE_HEALTH_FLOOR
+                || startHealth - currentHealth >= MAX_TASK_HEALTH_LOSS;
     }
 
     @Override

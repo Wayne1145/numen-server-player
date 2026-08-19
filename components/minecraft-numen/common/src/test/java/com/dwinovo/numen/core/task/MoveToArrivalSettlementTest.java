@@ -18,4 +18,12 @@ class MoveToArrivalSettlementTest {
         assertEquals(com.dwinovo.numen.task.TaskState.SUCCESS,
                 MoveToCompanionTask.settledArrivalState(true));
     }
+
+    @Test
+    void goalCellIsNotStableWhileStillFalling() {
+        assertEquals(false, MoveToCompanionTask.stablePhysicalArrival(false, false, false));
+        assertEquals(true, MoveToCompanionTask.stablePhysicalArrival(true, false, false));
+        assertEquals(true, MoveToCompanionTask.stablePhysicalArrival(false, true, false));
+        assertEquals(true, MoveToCompanionTask.stablePhysicalArrival(false, false, true));
+    }
 }

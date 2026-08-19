@@ -112,6 +112,7 @@ public final class LlmTaskChain implements TaskChain {
      */
     void freezeTick(NumenPlayer companion) {
         if (record != null && record.getState() == TaskState.RUNNING) {
+            task.observeBody(companion);
             record.extendDeadlineTo(record.getDeadlineGameTime() + 1);
         }
         queue.freezePendingDeadlines();
