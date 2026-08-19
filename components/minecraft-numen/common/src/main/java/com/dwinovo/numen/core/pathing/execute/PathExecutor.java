@@ -320,10 +320,21 @@ public final class PathExecutor {
             }
             if (ticksOnCurrent > timedOutAt(currentMovementOriginalCostEstimate,
                     NavSettings.get().movementTimeoutTicks)) {
-                Constants.LOG.debug("移动耗时 {} tick,超出估价 {} 太多,取消",
-                        ticksOnCurrent, currentMovementOriginalCostEstimate);
+                // 超时验尸:把身体关键状态一并给模型,好让下一步决策(换路/
+                // 校准/绕行)有依据。yaw/pitch 说明视角是否转向目标,digging
+                // 说明挖掘是否真的在推进——正式复测里\"向下移动\"卡死时这两项
+                // 曾完全不可见,只能猜。
+                String bodyInfo = String.format(
+                        "pos=(%.1f,%.1f,%.1f) yaw=%.1f pitch=%.1f feet=%s ground=%s wall=%s digging=%s",
+                        player.getX(), player.getY(), player.getZ(),
+                        player.getYRot(), player.getXRot(),
+                        playerFeet(player), player.onGround(), player.isInWall(),
+                        harness.isDigging());
+                Constants.LOG.debug("移动耗时 {} tick,超出估价 {} 太多,取消 ({})",
+                        ticksOnCurrent, currentMovementOriginalCostEstimate, bodyInfo);
                 cancel(describe(movement) + " 卡住:耗时 " + ticksOnCurrent
-                        + " tick,远超估价 " + (int) (double) currentMovementOriginalCostEstimate);
+                        + " tick,远超估价 " + (int) (double) currentMovementOriginalCostEstimate
+                        + " [" + bodyInfo + "]");
                 return true;
             }
         }
