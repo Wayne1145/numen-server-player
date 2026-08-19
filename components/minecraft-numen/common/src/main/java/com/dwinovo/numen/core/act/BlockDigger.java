@@ -78,6 +78,8 @@ public final class BlockDigger {
         BROKE_TARGET,
         /** An OCCLUDER in the way broke this tick (not the target) — a step toward it. */
         BROKE_OCCLUDER,
+        /** 原版破坏提交已发送，但世界方块状态没有变化（常见于领地/事件保护取消）。 */
+        BREAK_REJECTED,
         /** No face of the target is reachable and nothing safe occludes it — stuck (maps to OCCLUDED). */
         NO_SHOT
     }
@@ -196,17 +198,19 @@ public final class BlockDigger {
                     ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, side, level.getMaxBuildHeight(), -1);
             player.swing(InteractionHand.MAIN_HAND);
             if (player.getAbilities().instabuild) {
-                // creative: START 即破,连挖不设间隔(每 tick 一格)
+                // creative: START 通常即破，但插件/事件仍可能取消；必须以世界状态为准。
+                boolean committed = breakCommitted(state, level.getBlockState(pos));
                 reset();
-                return targetBreak ? DigResult.BROKE_TARGET : DigResult.BROKE_OCCLUDER;
+                return committed ? committedResult(targetBreak) : DigResult.BREAK_REJECTED;
             }
             if (!state.isAir()) {
                 // START 通道内服务端已自带 attack 与 insta-mine 判定,这里
                 // 不再补一次(重复 attack 会翻倍副作用,红石矿甚至会在
                 // insta-mine 后被旧 state 的 attack 原地点亮放回)
                 if (state.getDestroyProgress(player, level, pos) >= 1.0f) {
+                    boolean committed = breakCommitted(state, level.getBlockState(pos));
                     reset();                         // instamine: START broke it (no STOP is sent)
-                    return targetBreak ? DigResult.BROKE_TARGET : DigResult.BROKE_OCCLUDER;
+                    return committed ? committedResult(targetBreak) : DigResult.BREAK_REJECTED;
                 }
             }
             return DigResult.PROGRESSING;            // begin accumulating next tick
@@ -222,11 +226,32 @@ public final class BlockDigger {
             // removes it (no intact-for-a-frame flicker).
             player.gameMode.handleBlockBreakAction(pos,
                     ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, side, level.getMaxBuildHeight(), -1);
+            boolean committed = breakCommitted(state, level.getBlockState(pos));
             blockHitDelay = postBreakDelay();
             reset();
-            return targetBreak ? DigResult.BROKE_TARGET : DigResult.BROKE_OCCLUDER;
+            return committed ? committedResult(targetBreak) : DigResult.BREAK_REJECTED;
         }
         return DigResult.PROGRESSING;
+    }
+
+    /**
+     * 破坏成功必须由世界状态确认，而不是由“STOP 包已经发送”推断。
+     * 领地保护、Bukkit/Forge 事件或其他模组可在最后一刻取消破坏；旧逻辑会把
+     * 这种取消误报为 BROKE_TARGET，并无限重复记录同一 mined_positions 坐标。
+     */
+    static boolean breakCommitted(BlockState before, BlockState after) {
+        // 红石点亮、含水等属性变化不代表方块已经被破坏；必须确认方块类型真的离开原值。
+        return blockTypeChanged(before.getBlock(), after.getBlock());
+    }
+
+    /** 不依赖 Minecraft 注册表的纯策略钉桩。 */
+    static boolean blockTypeChanged(Object beforeBlock, Object afterBlock) {
+        return beforeBlock != afterBlock;
+    }
+
+    /** 纯策略钉桩：已确认提交后再区分目标块与开路遮挡块。 */
+    static DigResult committedResult(boolean targetBreak) {
+        return targetBreak ? DigResult.BROKE_TARGET : DigResult.BROKE_OCCLUDER;
     }
 
     private void start(BlockPos target, boolean selectTool) {

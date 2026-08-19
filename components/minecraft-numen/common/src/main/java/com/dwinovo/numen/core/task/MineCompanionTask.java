@@ -640,6 +640,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     noShotTicks = 1;
                 }
             }
+            case BREAK_REJECTED -> {
+                digger.cancel();
+                knownOres.remove(pos);
+                blacklist.add(pos.immutable());
+                lastBlockedReason = "server rejected the native break commit at "
+                        + pos.toShortString() + " (the block remained unchanged; it may be protected)";
+                fail(lastBlockedReason + "; no mined progress was recorded",
+                        FailureType.HAZARD);
+                clearNoShot();
+            }
             // PROGRESSING / BROKE_OCCLUDER — real progress; reset the stall counter.
             default -> clearNoShot();
         }

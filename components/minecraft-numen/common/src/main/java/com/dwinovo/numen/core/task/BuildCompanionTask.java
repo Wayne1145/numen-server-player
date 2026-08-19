@@ -281,6 +281,15 @@ public final class BuildCompanionTask extends AbstractCompanionTask<BuildTaskRec
                 placeDelayTicks = POST_BREAK_PLACE_DELAY_TICKS;
                 clearNoShot();
             }
+            case BREAK_REJECTED -> {
+                activeBreak = null;
+                digger.cancel();
+                clearNoShot();
+                fail("server rejected the native break commit for " + target.shortPos()
+                                + " (the block remained unchanged; it may be protected)",
+                        FailureType.HAZARD);
+                return TaskState.FAILED;
+            }
             case NO_SHOT -> {
                 if (target.pos().equals(noShotPos)) {
                     if (++noShotTicks >= MAX_NO_SHOT_TICKS) {
