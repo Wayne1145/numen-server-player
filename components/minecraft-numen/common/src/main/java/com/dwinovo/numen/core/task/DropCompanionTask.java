@@ -47,8 +47,9 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
     @Override
     protected void onStart() {
         Inventory inv = player.getInventory();
-        // 必须在移除物品前判断；移除后本次操作自己就会制造空槽。
-        boolean inventoryWasFull = inv.getFreeSlot() < 0;
+        // 必须在移除物品前计数；移除后本次操作自己就会制造空槽。
+        // 采矿安全门需要两格：只有一格时丢弃垃圾也必须防止下一轮前被自己捡回。
+        int freeNormalSlotsBeforeDrop = normalFreeSlots(inv);
         int have = PlayerInv.count(inv, r.item);
         dropped = Math.min(r.count, have);
         PlayerInv.remove(inv, r.item, dropped);
@@ -62,7 +63,7 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
             int lump = Math.min(remaining, max);
             remaining -= lump;
             ItemEntity droppedEntity = player.drop(new ItemStack(r.item, lump), false);
-            int extendedDelay = extendedPickupDelay(inventoryWasFull);
+            int extendedDelay = extendedPickupDelayForFreeSlots(freeNormalSlotsBeforeDrop);
             if (extendedDelay > 0 && droppedEntity != null) {
                 droppedEntity.setPickUpDelay(extendedDelay);
             }
@@ -105,8 +106,17 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
         return "drop interrupted";
     }
 
-    /** 纯策略钉桩：只有满背包腾格才覆盖原版拾取冷却。 */
-    static int extendedPickupDelay(boolean inventoryWasFull) {
-        return inventoryWasFull ? FULL_INVENTORY_PICKUP_DELAY_TICKS : 0;
+    /** 标准 36 格主背包中的空槽数；装备与副手不属于掉落容量。 */
+    private static int normalFreeSlots(Inventory inventory) {
+        int free = 0;
+        for (ItemStack stack : inventory.items) {
+            if (stack.isEmpty()) free++;
+        }
+        return free;
+    }
+
+    /** 纯策略钉桩：少于两格时，丢弃是在为采矿安全门腾格，必须覆盖短拾取冷却。 */
+    static int extendedPickupDelayForFreeSlots(int freeNormalSlotsBeforeDrop) {
+        return freeNormalSlotsBeforeDrop < 2 ? FULL_INVENTORY_PICKUP_DELAY_TICKS : 0;
     }
 }

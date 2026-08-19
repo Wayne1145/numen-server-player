@@ -9,11 +9,16 @@ class DropCompanionTaskPickupDelayTest {
 
     @Test
     void fullInventoryGetsOneMinuteNativePickupDelay() {
-        assertEquals(20 * 60, DropCompanionTask.extendedPickupDelay(true));
+        assertEquals(20 * 60, DropCompanionTask.extendedPickupDelayForFreeSlots(0));
     }
 
     @Test
-    void nonFullInventoryKeepsVanillaDropDelay() {
-        assertEquals(0, DropCompanionTask.extendedPickupDelay(false));
+    void oneFreeSlotStillGetsOneMinuteDelaySoTheDropCreatesTheRequiredSecondSlot() {
+        assertEquals(20 * 60, DropCompanionTask.extendedPickupDelayForFreeSlots(1));
+    }
+
+    @Test
+    void twoFreeSlotsKeepVanillaDropDelay() {
+        assertEquals(0, DropCompanionTask.extendedPickupDelayForFreeSlots(2));
     }
 }
