@@ -255,7 +255,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
-            case ARRIVED -> TaskState.SUCCESS;
+            // PlayerNav 的 ARRIVED 只说明“搜索目标格已满足”。下降/跳跃最后一拍里，
+            // 脚位可能已落入目标格，但身体仍在自由落体，任务级 reached() 尚未成立。
+            // 必须等原版物理真正稳定后再发成功终态，避免 final_y/on_ground 快照过早。
+            case ARRIVED -> settledArrivalState(reached());
             case FAILED -> {
                 // FIND:打不通就近候选 -> 除名,朝余下候选重开导航
                 if (r.kind == MoveToTaskRecord.Kind.FIND && candidates.size() > 1) {
@@ -305,6 +308,14 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 yield TaskState.FAILED;
             }
         };
+    }
+
+    /**
+     * 导航搜索层已抵达后，仍以任务层的稳定到达谓词裁决。抽成纯函数，
+     * 防止以后又把“脚位进格”和“身体物理稳定”混为一谈。
+     */
+    static TaskState settledArrivalState(boolean taskReached) {
+        return taskReached ? TaskState.SUCCESS : TaskState.RUNNING;
     }
 
     /** The retry rung's loosened goal — the destination widened to the SAME radius that
