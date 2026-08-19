@@ -113,6 +113,10 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     // 原版 ItemEntity 默认有约 10 tick 拾取延迟。旧值 5 会在物品尚不可拾取时
     // 就冲向下一块矿，实服出现“挖掉 11 块、gathered=0、掉落物散在矿洞里”。
     private static final int DROP_LOITER_TICKS = 40;
+    /** 已到濒死线时，不允许新一轮采矿继续导航。 */
+    private static final float UNSAFE_HEALTH_FLOOR = 8.0f;
+    /** 一次采集任务累计损失这么多生命就立即把危险交回模型，避免再承受第二击。 */
+    private static final float MAX_SAFE_HEALTH_LOSS = 6.0f;
 
     private final List<BlockPos> knownOres = new ArrayList<>();
     private final Set<BlockPos> blacklist = new HashSet<>();
@@ -155,6 +159,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 同一局部区域内、没有实际挖掘进展的连续寻路失败次数。 */
     private int localNavFailures;
     private BlockPos navFailureAnchor;
+    /** 任务启动时生命值；显著掉血说明当前路线/环境不安全，不能继续赌第二次伤害。 */
+    private float initialHealth;
 
     // Progressive dig (blocks break tick-by-tick at legitimate player speed, not
     // instabreak) — shared with the path executor so all breaking reads the same.
@@ -191,6 +197,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // blocks drop, and snapshot how many we already hold so the tally is the delta above it.
         dropItems = computeDropItems();
         baseline = inventoryMatch();
+        initialHealth = player.getHealth();
         // 首扫也走后台线程(加载区边界内的环形扫描可能要啃整个加载区,
         // 不挂 tick);结果落地前 onTick 的终局判定会等着。
         kickScan();
@@ -203,6 +210,31 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (gathered >= r.count) {
             progressNote = "gathered all requested";
             return TaskState.SUCCESS;
+        }
+
+        if (unsafeHealth(initialHealth, player.getHealth())) {
+            lastBlockedReason = "unsafe health while mining: " + player.getHealth()
+                    + "/" + player.getMaxHealth() + " HP (started at " + initialHealth + ")";
+            fail(lastBlockedReason + "; stop, reach safety and recover before retrying",
+                    FailureType.HAZARD);
+            return TaskState.FAILED;
+        }
+
+        Inventory inventory = player.getInventory();
+        boolean matchingStackSpace = false;
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.isEmpty() && dropItems.contains(stack.getItem())
+                    && stack.getCount() < stack.getMaxStackSize()) {
+                matchingStackSpace = true;
+                break;
+            }
+        }
+        if (!canAcceptDrops(inventory.getFreeSlot(), matchingStackSpace)) {
+            lastBlockedReason = "inventory is full and has no stack that can accept " + r.label;
+            fail(lastBlockedReason + "; free one normal inventory slot before mining",
+                    FailureType.NO_MATERIAL);
+            return TaskState.FAILED;
         }
 
         Level level = player.level();
@@ -776,6 +808,17 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 纯函数测试钉桩：达到上限后必须终止，不再逐个撞完全部候选。 */
     static boolean shouldAbortLocalNavFailures(int failures) {
         return failures >= MAX_LOCAL_NAV_FAILURES;
+    }
+
+    /** 纯策略钉桩：濒死，或本次任务已显著掉血，都必须停止采集导航。 */
+    static boolean unsafeHealth(float initialHealth, float currentHealth) {
+        return currentHealth <= UNSAFE_HEALTH_FLOOR
+                || initialHealth - currentHealth >= MAX_SAFE_HEALTH_LOSS;
+    }
+
+    /** 纯策略钉桩：有空槽，或已有同类非满堆栈，才有地方接住新掉落。 */
+    static boolean canAcceptDrops(int freeSlot, boolean matchingStackSpace) {
+        return freeSlot >= 0 || matchingStackSpace;
     }
 
     /** Terminal "nothing gathered, no ore left to go for" failure, distinguishing a
