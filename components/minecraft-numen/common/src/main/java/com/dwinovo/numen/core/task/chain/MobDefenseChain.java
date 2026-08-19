@@ -12,6 +12,7 @@ import com.dwinovo.numen.task.TaskChain;
 import com.dwinovo.numen.core.task.base.ToolSelect;
 import com.dwinovo.numen.core.task.survival.SurvivalDecisions;
 import com.dwinovo.numen.core.task.survival.SurvivalDecisions.ThreatResponse;
+import com.dwinovo.numen.core.task.survival.ThreatEscapePolicy;
 import com.dwinovo.numen.entity.NumenPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
@@ -193,10 +194,19 @@ public final class MobDefenseChain implements TaskChain, com.dwinovo.numen.task.
             // Boxed in with no escape plan: after a few failed attempts, stop
             // spiking for a while — holding the body helps nobody, and the LLM
             // (whose deadline resumes) may know a better way out.
-            if (++consecutiveNavFails >= MAX_ENGAGE_FAILS) {
-                cooldownUntilGameTime = companion.level().getGameTime() + CHAIN_COOLDOWN;
+            if (ThreatEscapePolicy.shouldDormant(++consecutiveNavFails)) {
+                InputDriver.stop(companion);
+                if (bodyLog != null) {
+                    bodyLog.report("could not flee from a hostile and went dormant for safety");
+                }
+                var server = companion.level().getServer();
+                if (server != null) {
+                    // 下一 server task 再移除，避免在当前玩家列表迭代中改集合。
+                    server.execute(() -> com.dwinovo.numen.entity.Companions.dormant(server, companion));
+                }
                 consecutiveNavFails = 0;
-                release(companion);
+                mode = Mode.NONE;
+                target = null;
             }
         }
     }
