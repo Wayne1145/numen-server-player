@@ -28,11 +28,11 @@
         {
           "name": "numen-api-common-1.20.1-0.0.7-fix3.jar",
           "url": "numen-api-common-1.20.1-0.0.7-fix3.jar",
-          "size": 706936,
-          "sha512": "a9dee4391cb911d316cf6aac8c18a9c1b5071cca82c71d6c3f871dfbdc40b1357ca0046b2dccf9f0cea91e3bc63e452d2cba4aafc7e4586d2ae587d5d99f1b0a",
-          "sha256": "3ecaa9bd6c794b5439b746130449109516260370bcb94a57bede489135a75d2f",
-          "sha1": "0871c6a5438e9c551c752f401ea9b6c4bebd6f1b",
-          "md5": "9ab3a510865daacbca51beae82333b5a"
+          "size": 707044,
+          "sha512": "2d158a41ff1e7797f6dd455af2f9e63d4e58ad87bc304c0b4fc887ac9ab817fdf8ba40483c0f0f18ff7fc85b9feeed41b305d5f32a8f91120bcafce76174999b",
+          "sha256": "cadb98389e9f6715be9d52d7baa58b17f57e14b6ebbb1ebc690e587bebb6fff1",
+          "sha1": "6e7206cdc0487fde494ea9ca207d33f94333fc87",
+          "md5": "d97cc17616c729b93fa7e43af21aedf1"
         }
       ]
     },
@@ -50,11 +50,11 @@
         {
           "name": "numen-api-common-1.20.1-0.0.7-fix3.jar",
           "url": "numen-api-common-1.20.1-0.0.7-fix3.jar",
-          "size": 706936,
-          "sha512": "a9dee4391cb911d316cf6aac8c18a9c1b5071cca82c71d6c3f871dfbdc40b1357ca0046b2dccf9f0cea91e3bc63e452d2cba4aafc7e4586d2ae587d5d99f1b0a",
-          "sha256": "3ecaa9bd6c794b5439b746130449109516260370bcb94a57bede489135a75d2f",
-          "sha1": "0871c6a5438e9c551c752f401ea9b6c4bebd6f1b",
-          "md5": "9ab3a510865daacbca51beae82333b5a"
+          "size": 707044,
+          "sha512": "2d158a41ff1e7797f6dd455af2f9e63d4e58ad87bc304c0b4fc887ac9ab817fdf8ba40483c0f0f18ff7fc85b9feeed41b305d5f32a8f91120bcafce76174999b",
+          "sha256": "cadb98389e9f6715be9d52d7baa58b17f57e14b6ebbb1ebc690e587bebb6fff1",
+          "sha1": "6e7206cdc0487fde494ea9ca207d33f94333fc87",
+          "md5": "d97cc17616c729b93fa7e43af21aedf1"
         }
       ]
     },
@@ -71,11 +71,11 @@
         {
           "name": "numen-api-common-1.20.1-0.0.7-fix3-sources.jar",
           "url": "numen-api-common-1.20.1-0.0.7-fix3-sources.jar",
-          "size": 492670,
-          "sha512": "11b1c4c4335a3024fdbb96e8559a3194315a5bb8fa83ba7ea508889f6ae4360b56d601d978311ecb5ce0deb9e10798a7ed5f3d38917232e7cbcda3595bb52abb",
-          "sha256": "8d3dce87fe204ddfd1c6b1e1d8769b036b6e77d9ab965b2240eb3b31e4e24c25",
-          "sha1": "d17d4ea675c3eb1756cb21498ab8f21d4cdd9ca8",
-          "md5": "77b14a692d9b820f8cf897e34a291207"
+          "size": 493029,
+          "sha512": "5cb0fa31962a5ceca076b49e1317e9a55c36fe26dc1c1872be6f7ec4efd3726cecc4f4d2d1ee17dc65bcd8d48d36025f51a7f445e8129b45fcd7a8342f70973c",
+          "sha256": "d8d792a7c839ff7228ed4e5258c70c342ee8b94bd6130a08ae95b5f608ab31bb",
+          "sha1": "2fc1b339249a34bdf3f09940c79ff98ba35086ae",
+          "md5": "a44d56df3a063991ce64aab6601c185e"
         }
       ]
     },
@@ -92,11 +92,11 @@
         {
           "name": "numen-api-common-1.20.1-0.0.7-fix3-javadoc.jar",
           "url": "numen-api-common-1.20.1-0.0.7-fix3-javadoc.jar",
-          "size": 1316635,
-          "sha512": "a9319fcfc08fdfb1789569c3f31013f631a34b06ab6475b24f3c998ad475f9c227edd598226e7e17e022ceed372fe21df411800ca96c0e7b4443548ca2896b19",
-          "sha256": "5070b9e80c2ac616ae545bb78130cd70bcdfbf4b2758c740971a1a167b90ddd8",
-          "sha1": "9382415d4553caba0a9b8bef68a99b067ab9fe38",
-          "md5": "a6e5a69c030b2043c24c743fd47a8e23"
+          "size": 1317063,
+          "sha512": "774d3c78063a4f1803f9b630f8e8993cfb4739e3dc4dc4233ea08f71d96e0b26eb31128dfbb5837d32143b0b47a70ab90245acdf8e39cef1e0113168f9c592ee",
+          "sha256": "d15d0a720b797eddd74c087f2c8f0a93e3447ec4f34e85396ad9628cb23cc2a3",
+          "sha1": "7fb4e86d3708c24be5db14c6bec265c2701093ee",
+          "md5": "28f58410c2d1fba8ac90318de1c12745"
         }
       ]
     }

@@ -147,8 +147,7 @@ public final class ExecHarness implements Movement.ExecutionDelegate {
     public void clearAllKeys() {
         keys.clear();
         target = null;
-        InputDriver.halt(player);
-        player.setShiftKeyDown(false);
+        InputDriver.stop(player);
     }
 
     /** 中止进行中的挖掘(服务端 ABORT + 清裂纹)。 */

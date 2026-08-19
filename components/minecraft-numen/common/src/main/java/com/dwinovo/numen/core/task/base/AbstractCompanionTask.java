@@ -270,8 +270,7 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
      */
     @Override
     public void suspend() {
-        InputDriver.halt(player);
-        player.setShiftKeyDown(false);
+        InputDriver.stop(player);
     }
 
     // resume(): default no-op from Suspendable — the next onTick re-drives from

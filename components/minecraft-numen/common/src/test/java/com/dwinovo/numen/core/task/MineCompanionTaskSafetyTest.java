@@ -22,9 +22,17 @@ class MineCompanionTaskSafetyTest {
     }
 
     @Test
-    void fullInventoryNeedsEitherAFreeSlotOrMatchingStackSpace() {
+    void miningWithoutAMatchingStackReservesOneRouteByproductSlot() {
         assertFalse(MineCompanionTask.canAcceptDrops(-1, false));
-        assertTrue(MineCompanionTask.canAcceptDrops(12, false));
+        assertFalse(MineCompanionTask.canAcceptDrops(0, false));
+        assertFalse(MineCompanionTask.canAcceptDrops(1, false));
+        assertTrue(MineCompanionTask.canAcceptDrops(2, false));
         assertTrue(MineCompanionTask.canAcceptDrops(-1, true));
+    }
+
+    @Test
+    void navigationWithoutMovementOrDiggingHasABoundedStallWindow() {
+        assertFalse(MineCompanionTask.navigationStalled(199));
+        assertTrue(MineCompanionTask.navigationStalled(200));
     }
 }

@@ -66,6 +66,21 @@ public final class InputDriver {
         p.setSprinting(false);
     }
 
+    /**
+     * 终止一个身体动作：先清水平输入，再按原版攀爬规则决定是否保持潜行。
+     * 梯子/藤蔓上的潜行就是玩家松开方向键后用来刹住下滑的原生动作；
+     * 平地则必须松开，避免任务结束后身体一直保持潜行。
+     */
+    public static void stop(ServerPlayer p) {
+        halt(p);
+        p.setShiftKeyDown(shouldBrakeOnClimbable(p.onClimbable()));
+    }
+
+    /** 纯策略钉桩：只有身体正附着在可攀爬方块时，停止后才继续按潜行。 */
+    static boolean shouldBrakeOnClimbable(boolean onClimbable) {
+        return onClimbable;
+    }
+
     /** Turn the body (and head) to face {@code target} horizontally — travel goes where yaw points. */
     private static void faceYaw(ServerPlayer p, Vec3 target) {
         double dx = target.x - p.getX();

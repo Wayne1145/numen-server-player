@@ -453,14 +453,12 @@ public final class PlayerNav {
         this.highlights = highlights;
     }
 
-    /** 停止导航:取消在飞搜索、丢段、清键停挖,并把身体停稳、松潜行。 */
+    /** 停止导航:取消在飞搜索、丢段、清键停挖；梯子上用原版潜行刹车。 */
     public void stop() {
         stopped = true;
         searchSatisfied = false;
         core.forceCancel();
-        InputDriver.halt(player);
-        // 垫柱逐 tick 按着潜行,路径终止时没有别人替它松——这里兜底
-        player.setShiftKeyDown(false);
+        InputDriver.stop(player);
     }
 }
 

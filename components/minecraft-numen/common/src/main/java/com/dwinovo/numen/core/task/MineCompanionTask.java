@@ -105,6 +105,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      *  旧逻辑每次只拉黑一个候选，成片封闭矿层会对最多 64 个近似等价目标逐个
      *  重跑 A*，表现为原地空转数分钟。移动到新区域或真正挖掉方块会重置。 */
     private static final int MAX_LOCAL_NAV_FAILURES = 6;
+    /** 导航连续这么久既没跨入下一移动、也没在真实挖掘，就把路线交回模型。 */
+    private static final int MAX_NAV_STALL_TICKS = 200;
     /** 走出该半径视为进入新区域，允许重新获得完整的寻路失败预算。 */
     private static final double NAV_FAILURE_RESET_DISTANCE_SQR = 16.0;
     /** How long a just-broken target's cell stays a walk-over goal (ticks) — the drop
@@ -230,9 +232,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 break;
             }
         }
-        if (!canAcceptDrops(inventory.getFreeSlot(), matchingStackSpace)) {
-            lastBlockedReason = "inventory is full and has no stack that can accept " + r.label;
-            fail(lastBlockedReason + "; free one normal inventory slot before mining",
+        int freeSlots = normalFreeSlots(inventory);
+        if (!canAcceptDrops(freeSlots, matchingStackSpace)) {
+            lastBlockedReason = "inventory has " + freeSlots
+                    + " free normal slot(s) and no stack that can accept " + r.label;
+            fail(lastBlockedReason + "; keep at least 2 normal slots free before mining"
+                            + " (one for route byproducts, one for the target drop)",
                     FailureType.NO_MATERIAL);
             return TaskState.FAILED;
         }
@@ -310,7 +315,17 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 navIsBranch = false;
             }
             switch (nav.tick()) {
-                case RUNNING -> { return TaskState.RUNNING; }
+                case RUNNING -> {
+                    if (navigationStalled(nav.stallTicks())) {
+                        lastBlockedReason = "navigation stalled for " + nav.stallTicks()
+                                + " ticks without movement progress or active digging";
+                        stopNav();
+                        fail(lastBlockedReason + "; choose another ore, route, or nearer waypoint",
+                                FailureType.BOXED_IN);
+                        return TaskState.FAILED;
+                    }
+                    return TaskState.RUNNING;
+                }
                 case ARRIVED -> {
                     stopNav();
                     // Arrived per the stance goal but nothing is reachable from here
@@ -816,9 +831,26 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 || initialHealth - currentHealth >= MAX_SAFE_HEALTH_LOSS;
     }
 
-    /** 纯策略钉桩：有空槽，或已有同类非满堆栈，才有地方接住新掉落。 */
-    static boolean canAcceptDrops(int freeSlot, boolean matchingStackSpace) {
-        return freeSlot >= 0 || matchingStackSpace;
+    /** 标准 36 格里当前有多少空槽；装备/副手槽不属于普通掉落容量。 */
+    private static int normalFreeSlots(Inventory inventory) {
+        int free = 0;
+        for (ItemStack stack : inventory.items) {
+            if (stack.isEmpty()) free++;
+        }
+        return free;
+    }
+
+    /**
+     * 纯策略钉桩：已有目标同类堆栈时可直接接收；否则至少留两格，避免
+     * 路径施工/开路副产物占掉唯一空槽后，目标矿物又无处可放。
+     */
+    static boolean canAcceptDrops(int freeSlots, boolean matchingStackSpace) {
+        return matchingStackSpace || freeSlots >= 2;
+    }
+
+    /** 纯策略钉桩：路径执行器的活性时钟达到上限后必须收束。 */
+    static boolean navigationStalled(int stallTicks) {
+        return stallTicks >= MAX_NAV_STALL_TICKS;
     }
 
     /** Terminal "nothing gathered, no ore left to go for" failure, distinguishing a
