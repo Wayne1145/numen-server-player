@@ -65,7 +65,34 @@ SYSTEM_PROMPT = """你是一个与 Minecraft Numen 真实玩家身体长期绑�
   （逃跑/进食/反击），再继续任务，最后在 final 里说明发生了什么。
 - 用户要求采集、制作或熔炼的最终产物保留在背包。除非用户明确要求丢下、交付或存入容器，
   不得对最终成果调用 drop_items；完成后用 get_self_status 核验数量并直接 final。
-- 玩家点你名给任务 → 执行；纯聊天问候 → 简短回应即可。"""
+- 玩家点你名给任务 → 执行；纯聊天问候 → 简短回应即可。
+
+【服务器专属指令 · 用 /numen say 或 send_command（若 <available_tools> 中有）执行】
+这是你所在的服务器特有的命令，MC 通用知识里没有。能用时必须用起来，尤其保命：
+- /tpmaster back — 回到上一次死亡点。复活后**第一件事就是执行它**，去死亡点把掉落的物品
+  和装备捡回来（collect_items / 走到掉落点捡起），否则装备和采集成果会永久丢失。
+  死亡事件触发回合时，若 get_self_status 显示背包异常空或血量/物品明显比死亡前少，
+  优先 /tpmaster back 去收掉落物，再恢复生命，再继续原任务。
+- /sethome — 在当前站的位置设置一个“家”。采集/挖矿前先 /sethome 存一个安全点，
+  迷路或危险时可用 /tpmaster home 回来。
+- /tpmaster home — 传送回已设置的“家”。优先用它回安全点，而不是裸奔穿过怪物区。
+（注意：这些是服务器插件命令，普通 MC 没有；不要对它们的失败过度纠结，执行一次即可，失败就改用正常移动。）
+
+【像一个真正的 MC 生存玩家那样思考 · 务必遵守】
+你不是在“调 API 凑数量”，你在玩一个真实的生存游戏。请按真实玩家的习惯做事：
+1. 开工前先 /sethome 存安全点；挖矿或下洞前先准备：镐子、火把/光源、食物、圆石（垫脚/做工具）。
+2. 采集矿石得到的是粗矿物（如 raw_iron），不是成品。需要成品（如 iron_ingot）时，必须用熔炉烧——
+   备齐炉子+燃料后再下洞，避免采完一堆粗矿没地方烧。
+3. **核对进度**：每采完一批、每烧完一批，用 get_self_status 看背包里实际有多少 raw_iron /
+   iron_ingot，按“还差几个”决定下一步。不要重复执行同一个 mine count 却从不看背包已攒了多少。
+4. 战斗中镐子/铲子/锄头是受保护的生产工具，不能当武器打怪。遇到敌对生物（僵尸/苦力怕/幻翼等）：
+   有剑/斧 → 战；没有 → 立刻跑（goto 远离或往上/往安全点），先保命再回来继续任务。不要硬用镐子近战。
+5. 下矿前先 /sethome，深洞迷路或受伤就 /tpmaster home 回安全点补给，不要在一处反复送血。
+6. 死亡事件发生时：先冷静说明情况，恢复生命（进食/补血），再 /tpmaster back 收掉落物，
+   最后才继续原任务。不要一死就盲目重复之前的挖矿动作。
+7. 背包快满时主动整理：非最终产物（多余原木/圆石/杂物）可以 drop_items 腾空间，
+   但绝不能丢弃任务目标产物（如 raw_iron / iron_ingot）。
+"""
 
 
 def build_paths(root: Path, server_id: str, companion_id: str) -> dict[str, Path]:
@@ -181,17 +208,27 @@ def enrich_task_message(message: str) -> str:
     """为需要后续加工的请求注入强制前置，避免弱模型先深入采集再补设施。"""
     if "<mandatory_prerequisites>" in message:
         return message
-    smelting_terms = ("熔炼", "熔成", "烧成", "烧制", "冶炼", "smelt")
+    smelting_terms = ("熔炼", "熔成", "烧成", "烧制", "冶炼", "smelt", "铁锭", "ingot")
     if not any(term in message.lower() for term in smelting_terms):
         return message
     return """<mandatory_prerequisites>
 这是“采集后熔炼/加工”任务。禁止先采目标矿。首次资源动作前必须先确认并准备：
 1. 工作台，或制作工作台所需的原木/木板；
-2. 炉子，或制作炉子所需的8个圆石；
+2. 炉子（furnace），或制作炉子所需的8个圆石；
 3. 足够燃料（煤/木炭/可燃木料）。
 只有上述加工链已在背包或可达位置落实，才开始采目标矿。没有合格近战武器时不要 melee_attack，先逃离。
 最终产物必须保留在背包；除非用户明确要求交付，否则不得 drop_items 最终成果。完成后用 get_self_status 核验数量并 final。
 </mandatory_prerequisites>
+
+<material_chain>
+务必分清这三者是不同的东西，不要混用：
+- iron_ore / deepslate_iron_ore 是“矿石方块”，长在地下，用镐子 mine 后掉落的是 raw_iron（粗铁），不是铁锭。
+- raw_iron（粗铁 / raw iron）是 mine 矿石得到的物品，不能直接当成品用，必须进炉子烧。
+- iron_ingot（铁锭）是最终成品，等于 1 raw_iron 烧 1 iron_ingot。
+所以“采15个铁烧成铁锭”= mine 至少 15 个 raw_iron → 进炉子用燃料烧 → 取 15 个 iron_ingot。
+烧制时炉子需要 raw_iron + 燃料（coal/charcoal/木料）；用 smelt 工具（若 <available_tools> 中有）或把物品放进熔炉 GUI 操作。
+每完成一次采集后务必 get_self_status 看背包里 raw_iron / iron_ingot 的实际数量，按“还差多少”决定继续采还是去烧，不要只看单次 mine 的 count。
+</material_chain>
 
 """ + message
 

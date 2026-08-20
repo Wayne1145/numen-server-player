@@ -23,10 +23,47 @@ from action_brain import RecoveryRequired
 
 
 def fingerprint(event: dict[str, Any]) -> str:
-    """事件的稳定指纹：字段排序序列化，用于游标比较。"""
+    """事件的稳定指纹：字段排序序列化，用于游标比较。
+
+    游标比较仍用原始完整字段（含 time/source），保证重启后能准确定位到
+    上次处理到的那条事件，避免漏处理。
+    """
     keys = ("kind", "source", "detail", "time")
     return json.dumps(
         {k: event.get(k) for k in keys}, sort_keys=True, ensure_ascii=False)
+
+
+def _dedupe_death_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把大量重复的死亡事件压缩成 1 条。
+
+    玩家被连续杀死几十次时，每个死亡事件 time 都不同（游标无法自然去重），
+    会把几十条 [death] yachiyo died 全灌进模型上下文，淹没玩家真正下达的
+    任务指令，并诱导模型反复执行无效的“复活/恢复”回合。模型真正需要的信息
+    只是“我死过、已复活”，细节交给 get_self_status 现场读取即可。
+
+    规则：
+    - death 事件保留 1 条（最新的），其余丢弃；
+    - chat / 其它事件原样保留（任务指令绝不能被压缩）。
+    游标推进不受影响（游标按原始事件推进），这里只做上下文注入前的压缩。
+    """
+    if not events:
+        return events
+    out: list[dict[str, Any]] = []
+    last_death: dict[str, Any] | None = None
+    death_lines: list[int] = []
+    for idx, ev in enumerate(events):
+        if ev.get("kind") == "death":
+            death_lines.append(idx)
+            last_death = ev  # 保留最新的死亡事件
+        else:
+            # 遇到非死亡事件，把前面攒的死亡事件作为 1 条 flush 出去
+            if last_death is not None:
+                out.append(last_death)
+                last_death = None
+            out.append(ev)
+    if last_death is not None:
+        out.append(last_death)
+    return out
 
 
 class EventCursor:
@@ -217,7 +254,8 @@ class ActiveAgent:
                    events: list[dict[str, Any]], now: float,
                    message: str | None = None) -> dict[str, Any]:
         message = message or self.message_template
-        for event in events:
+        injected = _dedupe_death_events(events)
+        for event in injected:
             ctx.inbox.push(event)
         try:
             result = ctx.run_turn(message)
