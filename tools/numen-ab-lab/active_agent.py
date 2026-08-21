@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -20,6 +21,9 @@ from typing import Any, Callable
 from event_inbox import EventInbox
 from persistent_brain import fsync_dir
 from action_brain import RecoveryRequired
+
+_log = logging.getLogger("numen.active-agent")
+_log.addHandler(logging.NullHandler())
 
 
 def fingerprint(event: dict[str, Any]) -> str:
