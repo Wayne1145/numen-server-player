@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -110,7 +111,7 @@ class TriggerPolicy:
         detail = event.get("detail", "") or ""
         if kind == "death" and source == self.companion_name:
             return True
-        if kind == "chat":
+        if kind in ("chat", "cancel"):
             return any(word in detail for word in self.mention_words)
         return False
 
@@ -127,6 +128,19 @@ class SurvivalPolicy:
         hp = float(status.get("hp", 20.0))
         hunger = int(status.get("hunger", 20))
         return hp < self.hp_threshold or hunger < self.hunger_threshold
+
+
+def _guidance_from_events(events: list[dict[str, Any]]) -> str:
+    """把一批玩家点名事件格式化为注入引导文本（保留原始玩家消息）。"""
+    lines = []
+    for e in events:
+        detail = str(e.get("detail", "")).strip()
+        if not detail:
+            continue
+        # 去掉可能的 @名字 前缀，保留玩家原话
+        text = re.sub(r"^@\S+\s*", "", detail)
+        lines.append(text.strip() or detail)
+    return "\n".join(lines) if lines else ""
 
 
 class ActiveAgent:
@@ -175,25 +189,8 @@ class ActiveAgent:
         trigger = self.trigger_policy_factory(companion)
         cursor_store = self._cursor_for(companion, ctx)
 
-        # 挂起的回合 checkpoint（上次因超时/中断未完成）：优先尝试自动恢复，
-        # 让长任务（mine/goto/build 等）在完成后能把结果接回来，而不是等到
-        # 玩家再次点名才处理。恢复是幂等的（poll 原 task_id）。
-        pending = getattr(getattr(ctx, "runtime", None), "checkpoint", None)
-        if pending is not None and pending.path.exists():
-            try:
-                result = ctx.recover_turn()
-                if result is not None:
-                    final = (result or {}).get("final") or ""
-                    if isinstance(final, str) and final.strip():
-                        self._send_reply(ctx, final)
-                    self._last_turn[companion] = now
-                    return result
-            except Exception as exc:
-                # 任务仍在运行或模型/提供商暂时失败时保留 checkpoint，但必须
-                # 留下可见日志。旧代码裸 pass 让服务看似 active、身体 idle，
-                # 实际每轮恢复都可能超时/耗尽轮次，用户与运维侧完全无证据。
-                _log.warning("挂起 checkpoint 自动恢复暂未完成: %s", exc)
-
+        # 先读事件（比 checkpoint 优先）：玩家点名/新消息必须能打断或
+        # 注入到进行中的回合，而不是被 checkpoint 恢复挡在门外。
         events = ctx.list_recent_events(count=50)
         cursor = cursor_store.load()
         new_events: list[dict[str, Any]] = []
@@ -208,6 +205,60 @@ class ActiveAgent:
             # 首次运行：只建立游标（最新一条），不触发历史事件。
             cursor_store.save(fingerprint(events[0]))
             return None
+
+        # 分类新事件：玩家点名（含聊天/引导）与 cancel 指令。
+        mentions = [e for e in new_events
+                    if trigger.should_trigger(e) and e.get("kind") != "cancel"]
+        cancels = [e for e in new_events
+                   if e.get("kind") == "cancel" and trigger.should_trigger(e)]
+
+        pending = getattr(getattr(ctx, "runtime", None), "checkpoint", None)
+        checkpoint_exists = pending is not None and pending.path.exists()
+
+        # cancel 事件：玩家明确叫停 → 清 checkpoint（保留已提交历史），
+        # 让身体任务停在服务端已停的状态，不再自动恢复旧回合。
+        if cancels:
+            _log.info("检测到 cancel 事件(%d 条)，清除 checkpoint，旧回合作废", len(cancels))
+            if checkpoint_exists:
+                try:
+                    pending.clear()
+                    checkpoint_exists = False
+                except Exception as exc:
+                    _log.warning("清除 checkpoint 失败: %s", exc)
+
+        # 玩家点名（chat/引导）且存在 checkpoint：注入引导，不打断任务。
+        if mentions and checkpoint_exists:
+            try:
+                guidance = _guidance_from_events(mentions)
+                if guidance:
+                    _log.info("任务进行中收到玩家点名(%d 条)，注入引导继续当前回合", len(mentions))
+                    result = ctx.recover_turn(guidance=guidance)
+                    if result is not None:
+                        final = (result or {}).get("final") or ""
+                        if isinstance(final, str) and final.strip():
+                            self._send_reply(ctx, final)
+                        self._last_turn[companion] = now
+                        self._save_cursor(cursor_store, events, consumed=True)
+                        self._clear_inbox(ctx, consumed=True)
+                        return result
+            except Exception as exc:
+                _log.warning("注入引导恢复回合暂未完成: %s", exc)
+
+        # 无玩家点名：挂起 checkpoint 优先自动恢复（原逻辑）。
+        if checkpoint_exists:
+            try:
+                result = ctx.recover_turn()
+                if result is not None:
+                    final = (result or {}).get("final") or ""
+                    if isinstance(final, str) and final.strip():
+                        self._send_reply(ctx, final)
+                    self._last_turn[companion] = now
+                    return result
+            except Exception as exc:
+                # 任务仍在运行或模型/提供商暂时失败时保留 checkpoint，但必须
+                # 留下可见日志。旧代码裸 pass 让服务看似 active、身体 idle，
+                # 实际每轮恢复都可能超时/耗尽轮次，用户与运维侧完全无证据。
+                _log.warning("挂起 checkpoint 自动恢复暂未完成: %s", exc)
 
         result = None
         consumed = False  # 本批事件已处理（触发执行 或 判定无关），应推进游标；cooldown 跳过不算
@@ -245,13 +296,8 @@ class ActiveAgent:
             # 清 checkpoint→再触发"死循环。事件已尝试处理过一次，即使失败
             # 也标记消费；玩家重新点名会带来新事件。
             # cooldown 跳过的轮次不推进（事件留给下次重试）。
-            if consumed and events:
-                cursor_store.save(fingerprint(events[0]))
-            if consumed:
-                try:
-                    ctx.inbox.clear()
-                except Exception:
-                    pass
+            self._save_cursor(cursor_store, events, consumed)
+            self._clear_inbox(ctx, consumed)
         return result
 
     def _auto_turn(self, ctx: Any, companion: str,
@@ -307,6 +353,25 @@ class ActiveAgent:
             self._send_reply(ctx, final)
         self._last_turn[companion] = now
         return result
+
+    @staticmethod
+    def _save_cursor(cursor_store: Any, events: list[dict[str, Any]],
+                     consumed: bool) -> None:
+        """推进游标到最新事件（仅当本轮已消费事件）。"""
+        if consumed and events:
+            try:
+                cursor_store.save(fingerprint(events[0]))
+            except Exception:
+                pass
+
+    @staticmethod
+    def _clear_inbox(ctx: Any, consumed: bool) -> None:
+        """清空事件收件箱（仅当本轮已消费事件）。"""
+        if consumed:
+            try:
+                ctx.inbox.clear()
+            except Exception:
+                pass
 
     def _send_reply(self, ctx: Any, final: str) -> None:
         """把文本发回游戏聊天栏（供 _auto_turn 与挂起回合恢复复用）。"""

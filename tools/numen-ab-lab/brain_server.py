@@ -127,11 +127,11 @@ class CompanionContext:
                                  "请稍候几秒再试，或先停止 numen-active-agent 服务。",
                         "actions": [], "busy": True}
 
-    def recover_turn(self) -> dict[str, Any]:
+    def recover_turn(self, guidance: str | None = None) -> dict[str, Any]:
         with self.lock:
             with CompanionRunLock(self.lock_path):
                 before = len(self.store.messages())
-                result = self.runtime.recover_turn()
+                result = self.runtime.recover_turn(guidance=guidance)
                 return {"final": result["final"], "actions": result.get("actions", []),
                         "history_before": before, "history_after": len(self.store.messages())}
 

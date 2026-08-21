@@ -264,6 +264,11 @@ public final class DebugCommands {
             return 0;
         }
         CompanionTickDispatcher.stopActive(companion, "stopped by command");
+        // 通知外部大脑：玩家明确叫停 → 大脑清除 checkpoint，不再自动恢复旧回合。
+        // detail 带 @名字 保证 active agent 的 mention_words 能命中触发。
+        com.dwinovo.numen.core.tools.RecentEventsTool.BUFFER.add(
+                "cancel", companion.getName().getString(),
+                "@" + companion.getName().getString() + " cancel");
         ctx.getSource().sendSuccess(() -> Component.literal(
                 companion.getName().getString() + " 的当前任务已叫停"), false);
         return 1;

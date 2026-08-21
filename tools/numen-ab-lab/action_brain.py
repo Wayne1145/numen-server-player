@@ -233,6 +233,20 @@ def execute_tool_exact(mcp: Any, *, companion: str, name: str,
     raise TimeoutError(f"task {task_id} did not reach a retained terminal state")
 
 
+def _guidance_message(guidance: str) -> str:
+    """把玩家在任务进行中插入的引导包装成模型可见的 user 消息。
+
+    语义：不打断原任务，仅追加指引让模型下一轮决策时读取。
+    """
+    return (
+        f"<player_guidance>\n"
+        f"玩家在任务进行中补了一句话（不是新任务，请不要丢弃当前任务，"
+        f"先读完再决定是否需要调整计划）：\n"
+        f"{guidance.strip()}\n"
+        f"</player_guidance>"
+    )
+
+
 class ActionBrainRuntime:
     """把一个用户请求执行为多轮模型决策，并在最终完成时整批提交历史。"""
 
@@ -519,7 +533,13 @@ class ActionBrainRuntime:
             self.sleep(1.0)
         raise TimeoutError(f"task {task_id} did not reach a retained terminal state")
 
-    def recover_turn(self) -> dict[str, Any]:
+    def recover_turn(self, guidance: str | None = None) -> dict[str, Any]:
+        """恢复中断回合；guidance 为玩家在任务进行中插入的新指令/指引。
+
+        与“打断”不同：旧任务不取消，只是把玩家消息作为一条 user 消息
+        追加进当前回合的 transient（旧工具结果之后），让模型下一轮决策
+        时能看到并可能调整计划。历史（已提交 session）保留不变。
+        """
         checkpoint = self.checkpoint.read()
         if checkpoint is None:
             raise RecoveryRequired("no incomplete turn to recover")
@@ -589,6 +609,11 @@ class ActionBrainRuntime:
                 "client_action_id": client_action_id,
                 "terminal": terminal, "transcript": transient,
             })
+            if guidance:
+                transient.append({
+                    "role": "user",
+                    "content": _guidance_message(guidance),
+                })
             return self._continue_turn(
                 base=self.store.messages(), transient=transient, actions=actions,
                 turn_id=turn_id, user_content=user_content, start_round=1,
@@ -629,6 +654,11 @@ class ActionBrainRuntime:
         elif state != "tool_completed":
             raise RecoveryRequired(f"unsupported checkpoint state: {state}")
 
+        if guidance:
+            transient.append({
+                "role": "user",
+                "content": _guidance_message(guidance),
+            })
         return self._continue_turn(
             base=self.store.messages(), transient=transient, actions=actions,
             turn_id=turn_id, user_content=user_content, start_round=1,
