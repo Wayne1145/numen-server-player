@@ -233,26 +233,39 @@ public final class DebugCommands {
     private static int sayToAI(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         String name = StringArgumentType.getString(ctx, "name");
         String message = StringArgumentType.getString(ctx, "message");
-        ServerPlayer owner = ctx.getSource().getPlayerOrException();
+        // 支持命令面板/控制台执行：自然语言指引本身不依赖玩家指向性。
+        // 有玩家用玩家身份，控制台/命令方块用 ServerOwner 身份（服务器所有）。
+        ServerPlayer owner = null;
+        String sourceName = "Console";
+        try {
+            owner = ctx.getSource().getPlayerOrException();
+            if (owner != null) {
+                sourceName = owner.getName().getString();
+            }
+        } catch (CommandSyntaxException ignored) {
+            // 非玩家源（控制台 / 命令方块 / RCON）：owner 保持 null，用 ServerOwner。
+        }
         // 找一个匹配的同伴(玩家所有或服务器所有)
         NumenPlayer target = null;
-        for (ServerPlayer p : owner.level().getServer().getPlayerList().getPlayers()) {
-            if (p instanceof NumenPlayer np
-                    && (np.isOwnedByPlayer(owner.getUUID())
-                        || np.getOwnerUuid().equals(com.dwinovo.numen.entity.ServerOwner.ID))
-                    && np.getName().getString().equals(name)) {
-                target = np;
-                break;
+        for (ServerPlayer p : ctx.getSource().getServer().getPlayerList().getPlayers()) {
+            if (p instanceof NumenPlayer np) {
+                boolean owned = owner != null
+                        ? np.isOwnedByPlayer(owner.getUUID())
+                        : np.getOwnerUuid().equals(com.dwinovo.numen.entity.ServerOwner.ID);
+                if (owned && np.getName().getString().equals(name)) {
+                    target = np;
+                    break;
+                }
             }
         }
         if (target == null) {
             ctx.getSource().sendFailure(Component.literal("没有名为 '" + name + "' 的同伴"));
             return 0;
         }
-        // 写入事件缓冲：source 用调用者名字，detail 用 "@<同伴名> " + 消息原文，
-        // 保证 active agent 的 mention_words(如 @1 / 同伴名) 一定能命中触发。
+        // 写入事件缓冲：source 用调用者名字(控制台为 Console)，detail 用
+        // "@<同伴名> " + 消息原文，保证 active agent 的 mention_words 能命中触发。
         com.dwinovo.numen.core.tools.RecentEventsTool.BUFFER.add(
-                "chat", owner.getName().getString(), "@" + name + " " + message);
+                "chat", sourceName, "@" + name + " " + message);
         ctx.getSource().sendSuccess(() -> Component.literal(
                 "已把消息发给 AI 大脑: " + message), false);
         return 1;

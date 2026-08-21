@@ -131,7 +131,7 @@ class SurvivalPolicy:
 
 
 def _guidance_from_events(events: list[dict[str, Any]]) -> str:
-    """把一批玩家点名事件格式化为注入引导文本（保留原始玩家消息）。"""
+    """把一批玩家点名事件格式化为注入引导文本（保留原始玩家消息与来源）。"""
     lines = []
     for e in events:
         detail = str(e.get("detail", "")).strip()
@@ -139,7 +139,11 @@ def _guidance_from_events(events: list[dict[str, Any]]) -> str:
             continue
         # 去掉可能的 @名字 前缀，保留玩家原话
         text = re.sub(r"^@\S+\s*", "", detail)
-        lines.append(text.strip() or detail)
+        source = str(e.get("source", "")).strip()
+        if source:
+            lines.append(f"[{source}] {text.strip() or detail}")
+        else:
+            lines.append(text.strip() or detail)
     return "\n".join(lines) if lines else ""
 
 

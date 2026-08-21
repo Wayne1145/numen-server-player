@@ -52,13 +52,24 @@ class GuidanceMessageTest(unittest.TestCase):
 
     def test_guidance_from_events_strips_mention(self):
         events = [
-            {"kind": "chat", "detail": "@yachiyo 先别挖了，把食物吃了"},
-            {"kind": "chat", "detail": "@yachiyo 然后回来找我"},
+            {"kind": "chat", "source": "Wayne9929", "detail": "@yachiyo 先别挖了，把食物吃了"},
+            {"kind": "chat", "source": "Wayne9929", "detail": "@yachiyo 然后回来找我"},
         ]
         text = _guidance_from_events(events)
         self.assertIn("先别挖了，把食物吃了", text)
         self.assertIn("然后回来找我", text)
         self.assertNotIn("@yachiyo", text)
+        # 来源玩家应保留，让模型知道是谁说的
+        self.assertIn("[Wayne9929]", text)
+
+    def test_guidance_from_events_console_source(self):
+        """控制台/命令面板发来的消息 source=Console 也应保留。"""
+        events = [
+            {"kind": "chat", "source": "Console", "detail": "@yachiyo 测试指引"},
+        ]
+        text = _guidance_from_events(events)
+        self.assertIn("[Console]", text)
+        self.assertIn("测试指引", text)
 
 
 class RecoverTurnGuidanceTest(unittest.TestCase):
