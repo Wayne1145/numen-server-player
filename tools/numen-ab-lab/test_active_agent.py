@@ -310,6 +310,10 @@ class ActiveAgentTest(unittest.TestCase):
             self.assertIsNotNone(result)
             self.assertGreaterEqual(ctx.recover_calls, 1)
             self.assertIn("已恢复中断回合", result["final"])
+            # checkpoint 恢复已经观察并处理了本批事件；成功后必须推进游标，
+            # 否则下一轮会把同一条玩家命令再次当作新任务。
+            self.assertEqual(
+                fingerprint(chat("ABBrain 无关消息", time="2")), cursor.load())
 
     def test_survival_check_triggers_on_low_hunger(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -247,6 +247,33 @@ class RunOnceCancelAndGuidanceTest(unittest.TestCase):
             self.assertIsNotNone(result)
             self.assertEqual("收到，继续。", result["final"])
 
+    def test_death_event_is_not_injected_as_player_guidance(self):
+        """死亡属于系统状态事件，不能伪装成玩家插话注入当前任务。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ckpt = self.FakeCheckpoint(root / "checkpoint.json")
+            ckpt.path.write_text('{"state":"tool_dispatched"}')
+            events = [
+                {"kind": "chat", "source": "Wayne",
+                 "detail": "@yachiyo 先回安全点", "time": "3001"},
+                {"kind": "death", "source": "yachiyo",
+                 "detail": "yachiyo died", "time": "3000"},
+            ]
+            ctx = self.FakeContext(events, ckpt)
+            agent = ActiveAgent(
+                context_factory=lambda companion: ctx,
+                cursor_store=lambda name, c: EventCursor(root / "cursor.json"),
+                mention_words=["@yachiyo"],
+            )
+            agent._send_reply = lambda ctx_, final: None
+            EventCursor(root / "cursor.json").save(fingerprint(
+                {"kind": "chat", "source": "prev", "detail": "prev", "time": "1"}))
+
+            agent.run_once("yachiyo")
+
+            self.assertIn("[Wayne] 先回安全点", ctx.recover_guidance)
+            self.assertNotIn("died", ctx.recover_guidance)
+
 
 if __name__ == "__main__":
     unittest.main()

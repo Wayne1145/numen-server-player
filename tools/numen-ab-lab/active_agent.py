@@ -210,9 +210,11 @@ class ActiveAgent:
             cursor_store.save(fingerprint(events[0]))
             return None
 
-        # 分类新事件：玩家点名（含聊天/引导）与 cancel 指令。
+        # 分类新事件：只有 chat 才是玩家插入的引导。death 虽然也会触发
+        # 独立生存回合，但它是系统状态事件，绝不能包装成 <player_guidance>
+        # 注入旧任务，否则会让模型误以为玩家反复说了“yachiyo died”。
         mentions = [e for e in new_events
-                    if trigger.should_trigger(e) and e.get("kind") != "cancel"]
+                    if e.get("kind") == "chat" and trigger.should_trigger(e)]
         cancels = [e for e in new_events
                    if e.get("kind") == "cancel" and trigger.should_trigger(e)]
 
@@ -257,6 +259,11 @@ class ActiveAgent:
                     if isinstance(final, str) and final.strip():
                         self._send_reply(ctx, final)
                     self._last_turn[companion] = now
+                    # 恢复成功说明本轮观察到的事件已被处理。必须同步推进
+                    # 游标并清 inbox；否则下一轮会把同一条玩家命令重新
+                    # 识别为新事件，重复开启任务/回复。
+                    self._save_cursor(cursor_store, events, consumed=bool(new_events))
+                    self._clear_inbox(ctx, consumed=bool(new_events))
                     return result
             except Exception as exc:
                 # 任务仍在运行或模型/提供商暂时失败时保留 checkpoint，但必须
