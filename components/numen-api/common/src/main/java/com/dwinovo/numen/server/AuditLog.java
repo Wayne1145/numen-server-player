@@ -10,6 +10,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Audit sink for every actuator call. Each record is written to the {@code numen-audit} logger as a
@@ -46,13 +47,26 @@ public final class AuditLog {
 
     private static final Logger LOG = LoggerFactory.getLogger("numen-audit");
     private static final int RING_MAX = 256;
+    /** 守护进程的周期性健康读取：仍保留在审计环中，但不刷生产控制台 INFO。 */
+    private static final Set<String> ROUTINE_READS = Set.of(
+            "list_companions", "get_recent_events", "get_self_status", "task_status");
 
     private final Deque<Record> ring = new ArrayDeque<>();
 
     public synchronized void record(Record r) {
-        LOG.info(r.toLine());
+        if (!r.success()) {
+            LOG.warn(r.toLine());
+        } else if (isRoutineSuccessfulRead(r)) {
+            LOG.debug(r.toLine());
+        } else {
+            LOG.info(r.toLine());
+        }
         ring.addLast(r);
         while (ring.size() > RING_MAX) ring.removeFirst();
+    }
+
+    static boolean isRoutineSuccessfulRead(Record r) {
+        return r.success() && ROUTINE_READS.contains(r.tool());
     }
 
     /** The most recent {@code n} audit records (oldest→newest). */

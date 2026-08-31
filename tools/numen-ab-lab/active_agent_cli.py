@@ -22,11 +22,28 @@ def make_cursor(server_id: str, companion_id: str) -> EventCursor:
 
 
 def build_context_factory(server_id: str, persona: str | None = None) -> Any:
+    """构造按同伴复用的 Context。
+
+    ActiveAgent 每 15 秒轮询一次。旧实现每轮都重建 McpClient 与
+    CompanionContext，后者还会解析同伴身份，导致每轮集中调用多次
+    list_companions。Mohist 会把这些调用调度到服务器线程并输出 INFO，
+    长期开着会造成控制台刷屏和不必要的 tick 压力。
+
+    守护进程是单线程串行使用 Context，因此可安全按同伴缓存；进程重启
+    或 MCP 真正断线时由 systemd 重建即可。
+    """
+    contexts: dict[str, CompanionContext] = {}
+
     def factory(companion: str) -> CompanionContext:
+        cached = contexts.get(companion)
+        if cached is not None:
+            return cached
         mcp = McpClient()
         mcp.initialize()
-        return CompanionContext(server_id=server_id, companion=companion,
-                                mcp=mcp, persona=persona)
+        context = CompanionContext(server_id=server_id, companion=companion,
+                                   mcp=mcp, persona=persona)
+        contexts[companion] = context
+        return context
     return factory
 
 
