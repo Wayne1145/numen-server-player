@@ -21,7 +21,7 @@ from typing import Any, Callable
 
 from event_inbox import EventInbox
 from persistent_brain import fsync_dir
-from action_brain import RecoveryRequired
+from action_brain import RecoveryRequired, TurnCancelled
 
 _log = logging.getLogger("numen.active-agent")
 _log.addHandler(logging.NullHandler())
@@ -209,6 +209,9 @@ class ActiveAgent:
             # 首次运行：只建立游标（最新一条），不触发历史事件。
             cursor_store.save(fingerprint(events[0]))
             return None
+        else:
+            # 空缓冲也建立持久启动水位，后来的第一条事件不是历史。
+            cursor_store.save("initialized-empty")
 
         # 分类新事件：只有 chat 才是玩家插入的引导。death 虽然也会触发
         # 独立生存回合，但它是系统状态事件，绝不能包装成 <player_guidance>
@@ -225,12 +228,22 @@ class ActiveAgent:
         # 让身体任务停在服务端已停的状态，不再自动恢复旧回合。
         if cancels:
             _log.info("检测到 cancel 事件(%d 条)，清除 checkpoint，旧回合作废", len(cancels))
+            # 最新 cancel 是明确时间边界：旧输入作废，只保留其后的新聊天。
+            last_cancel = max(i for i, e in enumerate(new_events) if e in cancels)
+            new_events = new_events[last_cancel + 1:]
+            mentions = [e for e in new_events if e.get("kind") == "chat" and trigger.should_trigger(e)]
+            self._clear_inbox(ctx, True)
+            self._last_turn.pop(companion, None)
             if checkpoint_exists:
                 try:
                     pending.clear()
                     checkpoint_exists = False
                 except Exception as exc:
                     _log.warning("清除 checkpoint 失败: %s", exc)
+
+        if cancels and not mentions:
+            self._save_cursor(cursor_store, events, True)
+            return None
 
         # 玩家点名（chat/引导）且存在 checkpoint：注入引导，不打断任务。
         if mentions and checkpoint_exists:
@@ -247,8 +260,13 @@ class ActiveAgent:
                         self._save_cursor(cursor_store, events, consumed=True)
                         self._clear_inbox(ctx, consumed=True)
                         return result
+            except TurnCancelled:
+                if checkpoint_exists:
+                    pending.clear()
+                return None
             except Exception as exc:
                 _log.warning("注入引导恢复回合暂未完成: %s", exc)
+                return None
 
         # 无玩家点名：挂起 checkpoint 优先自动恢复（原逻辑）。
         if checkpoint_exists:
@@ -265,13 +283,31 @@ class ActiveAgent:
                     self._save_cursor(cursor_store, events, consumed=bool(new_events))
                     self._clear_inbox(ctx, consumed=bool(new_events))
                     return result
+            except TurnCancelled:
+                pending.clear()
+                self._clear_inbox(ctx, True)
+                return None
             except Exception as exc:
                 # 任务仍在运行或模型/提供商暂时失败时保留 checkpoint，但必须
                 # 留下可见日志。旧代码裸 pass 让服务看似 active、身体 idle，
                 # 实际每轮恢复都可能超时/耗尽轮次，用户与运维侧完全无证据。
                 _log.warning("挂起 checkpoint 自动恢复暂未完成: %s", exc)
+                return None
 
+        # 游标是已接收水位；失败输入留在 durable inbox，缓冲淘汰后仍可重试。
+        queued = ctx.inbox.read() if hasattr(ctx.inbox, "read") else []
+        seen = {fingerprint(e) for e in queued}
+        for e in new_events:
+            if fingerprint(e) not in seen:
+                queued.append(e)
+                seen.add(fingerprint(e))
+        new_events = queued
+        retry_path = cursor_store.path.with_suffix(".retry.json") if hasattr(cursor_store, "path") else None
+        retry = json.loads(retry_path.read_text()) if retry_path is not None and retry_path.exists() else {}
+        if retry and time.time() < retry.get("next_at", 0):
+            return None
         result = None
+        completed = False
         consumed = False  # 本批事件已处理（触发执行 或 判定无关），应推进游标；cooldown 跳过不算
         triggered = bool(new_events) and any(trigger.should_trigger(e) for e in new_events)
         try:
@@ -281,6 +317,7 @@ class ActiveAgent:
                     return None
                 consumed = True
                 result = self._auto_turn(ctx, companion, new_events, now)
+                completed = not (result or {}).get("busy", False)
             elif new_events:
                 # 有新事件但判定无关（不点名）：标记已消费，推进游标，
                 # 避免同一批无关事件每轮都被重看。
@@ -301,14 +338,33 @@ class ActiveAgent:
                             ctx, companion, [], now,
                             message="你的生命值或饥饿度偏低，请处理生存状态"
                                     "（进食/治疗等），并简短说明。不要移动。")
+        except Exception:
+            if retry_path is not None:
+                attempts = int(retry.get("attempts", 0)) + 1
+                retry_path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = retry_path.with_suffix(".tmp")
+                with temporary.open("w") as handle:
+                    json.dump({"attempts": attempts, "next_at": time.time() + min(300, 30 * 2 ** min(attempts-1, 4))}, handle)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                temporary.replace(retry_path)
+            raise
         finally:
+            if completed and retry_path is not None:
+                retry_path.unlink(missing_ok=True)
             # 无论回合成功/失败都推进游标并清空收件箱：防止同一批事件在
             # _auto_turn 抛异常（如恢复失败）后无限重放，造成"恢复失败→
             # 清 checkpoint→再触发"死循环。事件已尝试处理过一次，即使失败
             # 也标记消费；玩家重新点名会带来新事件。
             # cooldown 跳过的轮次不推进（事件留给下次重试）。
+            if completed and (result or {}).get("state") != "cancelled":
+                observed = getattr(ctx, "_consumed_event_fingerprints", set())
+                latest = ctx.list_recent_events(count=50) if observed else events
+                # 只越过被当前回合实际读取的引导；不越过生成之后的新指令。
+                known = observed | {fingerprint(e) for e in events}
+                events = next(([e] for e in latest if fingerprint(e) in known), events)
             self._save_cursor(cursor_store, events, consumed)
-            self._clear_inbox(ctx, consumed)
+            self._clear_inbox(ctx, consumed and completed)
         return result
 
     def _auto_turn(self, ctx: Any, companion: str,
@@ -316,10 +372,18 @@ class ActiveAgent:
                    message: str | None = None) -> dict[str, Any]:
         message = message or self.message_template
         injected = _dedupe_death_events(events)
+        existing = {fingerprint(e) for e in ctx.inbox.read()} if hasattr(ctx.inbox, "read") else set()
         for event in injected:
-            ctx.inbox.push(event)
+            if fingerprint(event) not in existing:
+                ctx.inbox.push(event)
         try:
             result = ctx.run_turn(message)
+        except TurnCancelled:
+            # 不推进到生成期间的新事件；下次 poll 仍能消费 cancel 后新指令。
+            checkpoint = getattr(getattr(ctx, "runtime", None), "checkpoint", None)
+            if checkpoint is not None:
+                checkpoint.clear()
+            return {"state": "cancelled", "final": "", "actions": []}
         except RecoveryRequired:
             # 上次回合被外部中断（/numen stop、超时或进程被杀）而残留 checkpoint。
             # 自动尝试 recover_turn：恢复是幂等的（poll 原 task / 幂等
@@ -341,19 +405,8 @@ class ActiveAgent:
             except Exception as recover_exc:
                 n = self._recovery_failures.get(key, 0) + 1
                 self._recovery_failures[key] = n
-                _log.warning("自动恢复失败(%d/3): %s", n, recover_exc)
-                if n >= 3:
-                    # 连续 3 次失败说明 checkpoint 已坏（无效参数/损坏），
-                    # 保留只会让该假人永久卡住；清除它，让新任务能启动。
-                    _log.warning("恢复反复失败，清除损坏 checkpoint: %s", key)
-                    if ckpt_path is not None:
-                        try:
-                            ckpt_path.clear()
-                        except Exception:
-                            pass
-                    self._recovery_failures.pop(key, None)
-                    # 放弃本轮恢复，转为普通回合（可能仍会抛，但至少不循环）。
-                    raise
+                _log.warning("自动恢复失败(%d 次)，保留 checkpoint: %s", n, recover_exc)
+                # 临时模型故障不证明快照损坏；外层持久退避后再恢复。
                 raise
         # 把模型回合的最终回复发回游戏聊天栏，让玩家能直接看到/听到假人回应。
         # run_turn 返回 {"final": ..., "actions": [...], ...};final 是模型生成的
@@ -389,11 +442,11 @@ class ActiveAgent:
         try:
             # send_chat 是 SERVER_BODY_ACTION，需要控制 lease。
             # 先 acquire(返回 lease_id) → send_chat → release。
-            lease = ctx.mcp.call("acquire_control", {"companion": ctx.companion})
+            lease = ctx.mcp.call("acquire_control", {"companion": getattr(ctx, "companion_id", ctx.companion)})
             lease_id = (lease or {}).get("lease_id") if isinstance(lease, dict) else None
             try:
                 ctx.mcp.call("send_chat", {
-                    "companion": ctx.companion,
+                    "companion": getattr(ctx, "companion_id", ctx.companion),
                     "lease_id": lease_id,
                     "text": final.strip()[:300],
                 })
@@ -401,7 +454,7 @@ class ActiveAgent:
                 if lease_id:
                     try:
                         ctx.mcp.call("release_control", {
-                            "companion": ctx.companion, "lease_id": lease_id})
+                            "companion": getattr(ctx, "companion_id", ctx.companion), "lease_id": lease_id})
                     except Exception:
                         pass
         except Exception as exc:
@@ -417,7 +470,8 @@ class ActiveAgent:
                 for companion in companions_provider():
                     try:
                         self.run_once(companion)
-                    except Exception:
+                    except Exception as exc:
+                        _log.warning("同伴 %s 本轮失败，保留恢复信息: %s", companion, exc)
                         continue
             except Exception:
                 pass

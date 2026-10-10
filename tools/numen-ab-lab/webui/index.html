@@ -66,17 +66,19 @@ let serverId = () => $('server').value || 'numen-ab';
 // 2) localStorage 里记住的上次 token
 // 3) 手动输入框
 (function initToken() {
-  const urlToken = new URLSearchParams(location.search).get('token');
-  const saved = localStorage.getItem('numen-webui-token');
+  const urlToken = new URLSearchParams(location.hash.slice(1)).get('token');
+  const saved = sessionStorage.getItem('numen-webui-token');
+  localStorage.removeItem('numen-webui-token');
+  history.replaceState(null, '', location.pathname);
   if (urlToken) {
-    localStorage.setItem('numen-webui-token', urlToken);
+    sessionStorage.setItem('numen-webui-token', urlToken);
     $('token').value = urlToken;
   } else if (saved) {
     $('token').value = saved;
   }
 })();
 $('token').addEventListener('change', () => {
-  localStorage.setItem('numen-webui-token', $('token').value.trim());
+  sessionStorage.setItem('numen-webui-token', $('token').value.trim());
 });
 let auth = () => $('token').value ? { 'Authorization': 'Bearer ' + $('token').value } : {};
 

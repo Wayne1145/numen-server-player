@@ -1,0 +1,6 @@
+# Numen 项目架构与索引
+源码真源 /mnt/d/numen-server-player，审计 HEAD ce6ea14。正式 Python /home/wayne/.hermes/workspace/numen-ab-lab；正式 Minecraft C:/落幕曲1.6.4/fuwuduan；D 盘旧正式副本不能部署。Agent systemctl --user numen-active-agent.service，当前固定 --companions yachiyo --poll 15。
+主链：DebugCommands.sayToAI→RecentEventsTool.BUFFER→ActiveAgent.run_once（cursor/inbox）→CompanionContext（UUID/store/lock/world memory）→ActionBrainRuntime（checkpoint/model/execute_tool_exact/_commit）→McpClient→ServerMcpServer→ServerNumenActuatorImpl→TaskDispatch/CompanionTickDispatcher→ServerPlayer native body→ExternalTaskResultStore→final/send_chat。
+Java API 与 Minecraft 核心分仓组件；改 API 先 common+forge publish，再 minecraft clean 构建，必须核对 jarJar 内嵌 class。测试数须实时统计。正式重启由 Wayne 操作，隔离 C:/NumenLab/forge-light 优先，不做生产破坏测试。
+Serena 镜像 /home/wayne/.hermes/workspace/numen-serena-source 为跟踪的521 Java+23 Python文件，source-manifest.json 记录每文件SHA；本轮544/544索引，最终零差异。Java无完整MC classpath，空引用不是无调用，需文本/构建补证。镜像不可直接改为生产代码；变更前同步核对真源SHA。现有 serena-hud 固定在另工程，不要切根。
+审计报告真源 docs/serena-audit-2026-10-10.md。

@@ -45,6 +45,8 @@ public final class SecurityPolicy {
         this.enabledCapabilities = EnumSet.copyOf(enabledCapabilities);
         this.allowedDimensions = Set.copyOf(allowedDimensions);
         this.allowedNamespaces = Set.copyOf(allowedNamespaces);
+        if (!Double.isFinite(maxActionDistance) || maxActionDistance < 0)
+            throw new IllegalArgumentException("max_action_distance must be finite and non-negative");
         this.maxActionDistance = maxActionDistance;
         this.leaseTtlMs = leaseTtlMs;
         this.globalMaxConcurrentTasks = globalMaxConcurrentTasks;
@@ -63,6 +65,41 @@ public final class SecurityPolicy {
                 8,
                 120,
                 60);
+    }
+
+    /** 参数目标、半径在当前身体位置的三维距离球内；实际移动另由执行围栏限制。 */
+    public String distanceViolation(JsonElement args, double x, double y, double z) {
+        if (args == null || args.isJsonNull()) return null;
+        if (args.isJsonArray()) {
+            for (var child : args.getAsJsonArray()) {
+                String error = distanceViolation(child, x, y, z);
+                if (error != null) return error;
+            }
+        } else if (args.isJsonObject()) {
+            var object = args.getAsJsonObject();
+            for (var e : object.entrySet()) {
+                if (e.getValue().isJsonPrimitive() && e.getValue().getAsJsonPrimitive().isNumber()) {
+                    double number = e.getValue().getAsDouble();
+                    if (!Double.isFinite(number)) return "nonfinite argument: " + e.getKey();
+                    if ((e.getKey().equals("radius") || e.getKey().equals("search_radius") || e.getKey().equals("max_distance"))
+                            && (number < 0 || number > maxActionDistance)) return "radius outside max_action_distance";
+                }
+            }
+            if (object.has("x") && object.has("z")) {
+                try {
+                    double tx = object.get("x").getAsDouble(), tz = object.get("z").getAsDouble();
+                    double ty = object.has("y") && !object.get("y").isJsonNull() ? object.get("y").getAsDouble() : y;
+                    if (!Double.isFinite(tx) || !Double.isFinite(ty) || !Double.isFinite(tz)
+                            || Math.sqrt((tx-x)*(tx-x)+(ty-y)*(ty-y)+(tz-z)*(tz-z)) > maxActionDistance)
+                        return "target outside max_action_distance";
+                } catch (RuntimeException ex) { return "invalid target coordinates"; }
+            }
+            for (var e : object.entrySet()) {
+                String error = distanceViolation(e.getValue(), x, y, z);
+                if (error != null) return error;
+            }
+        }
+        return null;
     }
 
     public long leaseTtlMs() { return leaseTtlMs; }

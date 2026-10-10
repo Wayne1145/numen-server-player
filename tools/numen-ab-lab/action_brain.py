@@ -7,6 +7,8 @@ import json
 import os
 import re
 import time
+import threading
+from concurrent.futures import Future, TimeoutError as FutureTimeout
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -80,6 +82,10 @@ def _same_decision(a: Any, b: Any) -> bool:
     if a.get("type") != "tool" or b.get("type") != "tool":
         return False
     return a.get("name") == b.get("name") and a.get("arguments") == b.get("arguments")
+
+
+class TurnCancelled(RuntimeError):
+    """取消时间边界已变化，禁止旧回合继续派发或提交。"""
 
 
 class RecoveryRequired(RuntimeError):
@@ -174,23 +180,29 @@ def execute_tool_exact(mcp: Any, *, companion: str, name: str,
                        sleep: Callable[[float], None] = time.sleep,
                        timeout_seconds: float = 300.0,
                        on_dispatched: Callable[[Any, str | None], None] | None = None,
-                       client_action_id: str | None = None) -> dict[str, Any]:
+                       client_action_id: str | None = None,
+                       boundary: Callable[[], Any] = lambda: None,
+                       action_generation: int | None = None) -> dict[str, Any]:
     """短租约派发工具；异步任务只按原 task_id 等待明确终态。
 
     写动作默认注入 client_action_id：服务端按该 ID 幂等派发，即使回执丢失，
     重发同一 ID 也不会产生第二次副作用。
     """
+    boundary()
     call_args = dict(arguments)
     call_args["companion"] = companion
     if requires_control:
         if client_action_id is None:
             client_action_id = str(uuid.uuid4())
         call_args["client_action_id"] = client_action_id
+        if action_generation is not None:
+            call_args["action_generation"] = action_generation
         lease_id = mcp.call("acquire_control", {"companion": companion})["lease_id"]
         call_args["lease_id"] = lease_id
     else:
         lease_id = None
     try:
+        boundary()
         dispatch = mcp.call(name, call_args)
     except BaseException:
         # 派发失败没有回执可落盘，但仍必须立刻释放租约；否则只能等
@@ -221,6 +233,7 @@ def execute_tool_exact(mcp: Any, *, companion: str, name: str,
     samples: list[Any] = []
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
+        boundary()
         status = mcp.call("task_status", {"companion": companion, "task_id": task_id})
         samples.append(status)
         state = status.get("state") if isinstance(status, dict) else None
@@ -256,7 +269,8 @@ class ActionBrainRuntime:
                  sleep: Callable[[float], None] = time.sleep, max_rounds: int = 8,
                  max_format_retries: int = 2,
                  local_tools: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
-                 empty_result_cap: int = 2) -> None:
+                 empty_result_cap: int = 2,
+                 event_boundary: Callable[[], str] | None = None) -> None:
         self.store = store
         self.checkpoint = checkpoint
         self.mcp = mcp
@@ -270,6 +284,43 @@ class ActionBrainRuntime:
         self.empty_result_cap = empty_result_cap
         # 本地工具不经 MCP、不持租约(如 load_skill / remember_block)，由运行时直接执行。
         self.local_tools = local_tools or {}
+        self.event_boundary = event_boundary or (lambda: "")
+        self._pending_guidance: list[str] = []
+        self.action_generation: int | None = None
+
+    def _model_with_events(self, messages: list[dict[str, str]]) -> str:
+        """生成子线程只返回文本；主线程保持事件泵，取消后丢弃迟到答案。"""
+        previous = getattr(self, "_model_future", None)
+        if previous is not None and not previous.done():
+            raise RuntimeError("previous cancelled model request is still draining")
+        future = Future()
+        self._model_future = future
+        def generate():
+            try:
+                future.set_result(self.model(messages, self.tools))
+            except BaseException as exc:
+                future.set_exception(exc)
+        threading.Thread(target=generate, name="numen-model", daemon=True).start()
+        while True:
+            try:
+                result = future.result(timeout=0.2)
+                self._check_boundary()
+                return result
+            except FutureTimeout:
+                if future.done():
+                    return future.result()
+                self._check_boundary()
+
+    def _check_boundary(self) -> None:
+        """在生成前后与每次派发/轮询处读事件；失败关闭，取消后不可再派发。"""
+        guidance = self.event_boundary()
+        if guidance:
+            self._pending_guidance.append(guidance)
+
+    def _inject_guidance(self, transient: list[dict[str, str]]) -> None:
+        for guidance in self._pending_guidance:
+            transient.append({"role": "user", "content": _guidance_message(guidance)})
+        self._pending_guidance.clear()
 
     def run_turn(self, user_content: str) -> dict[str, Any]:
         existing = self.checkpoint.read()
@@ -321,11 +372,22 @@ class ActionBrainRuntime:
         for number in range(start_round, self.max_rounds + 1):
                 # 跨轮保留循环/不可用工具纠正。旧代码把 correction 建在循环内，
                 # append 后立刻 continue，下一轮又重置为空，模型从未见到提示。
+                self._check_boundary()
+                self._inject_guidance(transient)
+                current_checkpoint = self.checkpoint.read()
+                if current_checkpoint is not None:
+                    current_checkpoint["transcript"] = transient
+                    self.checkpoint.write(current_checkpoint)
                 correction = pending_correction
                 pending_correction = []
                 decision = None
                 for attempt in range(self.max_format_retries + 1):
-                    raw = self.model([*base, *transient, *correction], self.tools)
+                    raw = self._model_with_events([*base, *transient, *correction])
+                    self._check_boundary()
+                    if self._pending_guidance:
+                        self._inject_guidance(transient)
+                        # 生成期间收到指引，丢弃旧决策，下一轮先读新消息。
+                        break
                     try:
                         decision = parse_decision(raw)
                         break
@@ -340,6 +402,8 @@ class ActionBrainRuntime:
                             {"role": "user", "content":
                              "格式错误。只返回规定的一个 JSON 对象，不要 Markdown 或额外文字。"},
                         ])
+                if decision is None and transient and "<player_guidance>" in transient[-1]["content"]:
+                    continue
                 assert decision is not None
                 if decision["type"] == "final":
                     final = decision["content"]
@@ -409,6 +473,7 @@ class ActionBrainRuntime:
                             "请改用 mine / look_around / scan_nearby_entities 完成目标。"
                         )
                         transient.append({"role": "assistant", "content": unavailable_final})
+                        self._commit(turn_id, transient)
                         return {"final": unavailable_final, "actions": actions,
                                 "rounds": number, "early_final": "unavailable_tool_cap"}
                     continue
@@ -433,6 +498,7 @@ class ActionBrainRuntime:
                 client_action_id = str(uuid.uuid4())
                 self.checkpoint.write({
                     "state": "tool_planned", "turn_id": turn_id, "user": user_content,
+                    "action_generation": self.action_generation,
                     "tool": name, "arguments": decision["arguments"],
                     "client_action_id": client_action_id,
                     "transcript": transient,
@@ -441,6 +507,7 @@ class ActionBrainRuntime:
                 def record_dispatch(dispatch: Any, task_id: str | None) -> None:
                     self.checkpoint.write({
                         "state": "tool_dispatched", "turn_id": turn_id,
+                        "action_generation": self.action_generation,
                         "user": user_content,
                         "tool": name, "arguments": decision["arguments"],
                         "client_action_id": client_action_id,
@@ -454,7 +521,8 @@ class ActionBrainRuntime:
                         arguments=decision["arguments"],
                         requires_control=self.requires_control.get(name, False), sleep=self.sleep,
                         on_dispatched=record_dispatch,
-                        client_action_id=client_action_id,
+                        client_action_id=client_action_id, boundary=self._check_boundary,
+                        action_generation=self.action_generation,
                     )
                 except RuntimeError as exc:
                     if not _is_business_tool_failure(exc):
@@ -498,6 +566,7 @@ class ActionBrainRuntime:
                 })
                 self.checkpoint.write({
                     "state": "tool_completed", "turn_id": turn_id,
+                    "action_generation": self.action_generation,
                     "user": user_content,
                     "tool": name, "task_id": outcome["task_id"],
                     "terminal": outcome["terminal"], "transcript": transient,
@@ -508,6 +577,7 @@ class ActionBrainRuntime:
         samples: list[Any] = []
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
+            self._check_boundary()
             try:
                 status = self.mcp.call("task_status", {
                     "companion": self.companion, "task_id": task_id,
@@ -520,8 +590,9 @@ class ActionBrainRuntime:
                 msg = str(exc)
                 if "unknown task_id" in msg:
                     return {"terminal": {
-                        "state": "done", "task_id": task_id,
-                        "detail": "cleared after completion", "result": None,
+                        "state": "error", "task_id": task_id,
+                        "detail": "任务记录未知（重启/淘汰/丢失），不能证明成功；先感知核验，禁止盲目重放。",
+                        "result": None, "requires_verification": True,
                     }, "samples": samples}
                 raise
             samples.append(status)
@@ -543,6 +614,9 @@ class ActionBrainRuntime:
         checkpoint = self.checkpoint.read()
         if checkpoint is None:
             raise RecoveryRequired("no incomplete turn to recover")
+        old_generation = checkpoint.get("action_generation")
+        if old_generation is not None and self.action_generation is not None and old_generation != self.action_generation:
+            raise TurnCancelled("checkpoint generation was cancelled or belongs to old server epoch")
         turn_id = checkpoint.get("turn_id")
         if not isinstance(turn_id, str) or not turn_id:
             raise RecoveryRequired("checkpoint has no turn_id")
@@ -581,7 +655,8 @@ class ActionBrainRuntime:
                     self.mcp, companion=self.companion, name=name,
                     arguments=arguments,
                     requires_control=self.requires_control.get(name, False), sleep=self.sleep,
-                    client_action_id=client_action_id,
+                    client_action_id=client_action_id, boundary=self._check_boundary,
+                        action_generation=self.action_generation,
                 )
                 terminal = outcome.get("terminal")
             except RuntimeError as exc:
@@ -605,6 +680,7 @@ class ActionBrainRuntime:
             })
             self.checkpoint.write({
                 "state": "tool_completed", "turn_id": turn_id,
+                    "action_generation": self.action_generation,
                 "user": user_content, "tool": name, "task_id": outcome["task_id"],
                 "client_action_id": client_action_id,
                 "terminal": terminal, "transcript": transient,
@@ -631,8 +707,12 @@ class ActionBrainRuntime:
         if state == "tool_dispatched":
             task_id = checkpoint.get("task_id")
             if not isinstance(task_id, str) or not task_id:
-                raise RecoveryRequired("ambiguous dispatched action has no task_id")
-            polled = self._poll_existing_task(task_id)
+                receipt = checkpoint.get("dispatch")
+                if not isinstance(receipt, dict) or _is_queued_empty(receipt):
+                    raise RecoveryRequired("ambiguous dispatched action has no receipt or task_id")
+                polled = {"terminal": receipt, "samples": []}
+            else:
+                polled = self._poll_existing_task(task_id)
             outcome = {
                 "dispatch": checkpoint.get("dispatch"), "task_id": task_id,
                 "terminal": polled["terminal"], "samples": polled["samples"],
@@ -648,6 +728,7 @@ class ActionBrainRuntime:
             })
             self.checkpoint.write({
                 "state": "tool_completed", "turn_id": turn_id,
+                    "action_generation": self.action_generation,
                 "user": user_content, "tool": name, "task_id": task_id,
                 "terminal": polled["terminal"], "transcript": transient,
             })

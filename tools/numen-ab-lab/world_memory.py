@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import fcntl
+from functools import wraps
 import os
 import uuid
 from datetime import datetime, timezone
@@ -16,6 +18,21 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def locked_memory_write(method):
+    """刷新与修改在文件锁内完成，避免两个缓存依次覆盖彼此。"""
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.with_suffix('.lock').open('a+b') as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                self.reload()
+                return method(self, *args, **kwargs)
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    return wrapped
+
+
 class WorldMemoryStore:
     """按同伴隔离的 JSON 记忆文件，原子写入。"""
 
@@ -24,7 +41,11 @@ class WorldMemoryStore:
         self._blocks: list[dict[str, Any]] = []
         self._load()
 
+    def reload(self) -> None:
+        self._load()
+
     def _load(self) -> None:
+        self._blocks.clear()
         if not self.path.exists():
             return
         try:
@@ -45,14 +66,18 @@ class WorldMemoryStore:
         temporary.replace(self.path)
         fsync_dir(self.path.parent)
 
+    @locked_memory_write
     def remember(self, block_type: str, x: int, y: int, z: int,
-                 note: str | None = None) -> dict[str, Any]:
+                 note: str | None = None, dimension: str = "minecraft:overworld") -> dict[str, Any]:
         """记录/更新一个位置；同一类型同一坐标视为同一目标，只更新备注。"""
+        if not isinstance(dimension, str) or ":" not in dimension:
+            raise ValueError("dimension is required")
         block_type = block_type.strip()
         if not block_type:
             raise ValueError("block_type is required")
         for existing in self._blocks:
-            if (existing.get("type") == block_type
+            if (existing.get("dimension", "minecraft:overworld") == dimension
+                    and existing.get("type") == block_type
                     and existing.get("x") == int(x)
                     and existing.get("y") == int(y)
                     and existing.get("z") == int(z)):
@@ -62,7 +87,7 @@ class WorldMemoryStore:
                 self._save()
                 return existing
         entry = {
-            "type": block_type,
+            "type": block_type, "dimension": dimension,
             "x": int(x), "y": int(y), "z": int(z),
             "seen_at": _now(),
             "id": str(uuid.uuid4()),
@@ -74,9 +99,13 @@ class WorldMemoryStore:
         return entry
 
     def recall(self, x: float | None = None, z: float | None = None,
-               type: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+               type: str | None = None, limit: int = 20,
+               dimension: str | None = "minecraft:overworld") -> list[dict[str, Any]]:
         """按距离（提供 x,z 时）或最近记忆排序返回；type 可选过滤。"""
+        self.reload()
         items = self._blocks
+        if dimension is not None:
+            items = [b for b in items if b.get("dimension", "minecraft:overworld") == dimension]
         if type is not None:
             items = [b for b in items if b.get("type") == type]
         if x is not None and z is not None:

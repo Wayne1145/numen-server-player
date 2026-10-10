@@ -1,0 +1,359 @@
+{
+  "server_id": "audit-accept-431ae131",
+  "result": {
+    "final": "已完成：用 1 个白桦原木合成出 4 个白桦木板，全部保留在背包（slot 35，数量 4）。原木剩余 2 个，未丢弃任何物品。",
+    "actions": [
+      {
+        "tool": "get_self_status",
+        "dispatch": {
+          "entity_id": 199,
+          "action_generation": 1,
+          "name": "Actor",
+          "game_mode": "creative",
+          "hp": 20.0,
+          "max_hp": 20.0,
+          "hunger": 20,
+          "saturation": 0.0,
+          "position": {
+            "x": -329.5,
+            "y": 85.0,
+            "z": 150.5
+          },
+          "dimension": "minecraft:overworld",
+          "biome": "minecraft:stony_shore",
+          "structures": [],
+          "equipment": {
+            "mainhand": {
+              "item": "minecraft:golden_apple"
+            }
+          },
+          "inventory": {
+            "items": [
+              {
+                "slot": 0,
+                "item": "minecraft:stone",
+                "count": 7
+              },
+              {
+                "slot": 1,
+                "item": "minecraft:stone",
+                "count": 3
+              },
+              {
+                "slot": 2,
+                "item": "minecraft:netherite_pickaxe",
+                "count": 1
+              },
+              {
+                "slot": 3,
+                "item": "minecraft:cobblestone",
+                "count": 63
+              },
+              {
+                "slot": 4,
+                "item": "minecraft:birch_log",
+                "count": 3
+              },
+              {
+                "slot": 5,
+                "item": "minecraft:iron_ingot",
+                "count": 15
+              },
+              {
+                "slot": 6,
+                "item": "minecraft:cobblestone",
+                "count": 64
+              },
+              {
+                "slot": 7,
+                "item": "minecraft:andesite",
+                "count": 9
+              },
+              {
+                "slot": 8,
+                "item": "minecraft:golden_apple",
+                "count": 1
+              },
+              {
+                "slot": 9,
+                "item": "minecraft:cobblestone",
+                "count": 24
+              },
+              {
+                "slot": 10,
+                "item": "minecraft:rotten_flesh",
+                "count": 1
+              },
+              {
+                "slot": 11,
+                "item": "minecraft:granite",
+                "count": 4
+              },
+              {
+                "slot": 12,
+                "item": "minecraft:diorite",
+                "count": 1
+              }
+            ],
+            "slots_used": 13,
+            "slots_total": 41
+          },
+          "target": null,
+          "on_ground": true,
+          "in_water": false,
+          "block_above": "minecraft:air",
+          "air": "300/300 ticks",
+          "in_lava": false,
+          "body_health": {
+            "degraded": false,
+            "consecutive_tick_errors": 0
+          }
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "craft",
+        "dispatch": {
+          "success": true,
+          "message": "crafted 4x birch_planks — used 1x birch_log. Used your own 2x2 grid. Now carrying 4x birch_planks.",
+          "data": {
+            "crafted": 4,
+            "carrying": 4
+          }
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "get_self_status",
+        "dispatch": {
+          "entity_id": 199,
+          "action_generation": 1,
+          "name": "Actor",
+          "game_mode": "creative",
+          "hp": 20.0,
+          "max_hp": 20.0,
+          "hunger": 20,
+          "saturation": 0.0,
+          "position": {
+            "x": -329.5,
+            "y": 85.0,
+            "z": 150.5
+          },
+          "dimension": "minecraft:overworld",
+          "biome": "minecraft:stony_shore",
+          "structures": [],
+          "equipment": {
+            "mainhand": {
+              "item": "minecraft:golden_apple"
+            }
+          },
+          "inventory": {
+            "items": [
+              {
+                "slot": 0,
+                "item": "minecraft:stone",
+                "count": 7
+              },
+              {
+                "slot": 1,
+                "item": "minecraft:stone",
+                "count": 3
+              },
+              {
+                "slot": 2,
+                "item": "minecraft:netherite_pickaxe",
+                "count": 1
+              },
+              {
+                "slot": 3,
+                "item": "minecraft:cobblestone",
+                "count": 63
+              },
+              {
+                "slot": 4,
+                "item": "minecraft:birch_log",
+                "count": 2
+              },
+              {
+                "slot": 5,
+                "item": "minecraft:iron_ingot",
+                "count": 15
+              },
+              {
+                "slot": 6,
+                "item": "minecraft:cobblestone",
+                "count": 64
+              },
+              {
+                "slot": 7,
+                "item": "minecraft:andesite",
+                "count": 9
+              },
+              {
+                "slot": 8,
+                "item": "minecraft:golden_apple",
+                "count": 1
+              },
+              {
+                "slot": 9,
+                "item": "minecraft:cobblestone",
+                "count": 24
+              },
+              {
+                "slot": 10,
+                "item": "minecraft:rotten_flesh",
+                "count": 1
+              },
+              {
+                "slot": 11,
+                "item": "minecraft:granite",
+                "count": 4
+              },
+              {
+                "slot": 12,
+                "item": "minecraft:diorite",
+                "count": 1
+              },
+              {
+                "slot": 35,
+                "item": "minecraft:birch_planks",
+                "count": 4
+              }
+            ],
+            "slots_used": 14,
+            "slots_total": 41
+          },
+          "target": null,
+          "on_ground": true,
+          "in_water": false,
+          "block_above": "minecraft:air",
+          "air": "300/300 ticks",
+          "in_lava": false,
+          "body_health": {
+            "degraded": false,
+            "consecutive_tick_errors": 0
+          }
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      }
+    ],
+    "history_before": 0,
+    "history_after": 8
+  },
+  "status": {
+    "entity_id": 199,
+    "action_generation": 1,
+    "name": "Actor",
+    "game_mode": "creative",
+    "hp": 20.0,
+    "max_hp": 20.0,
+    "hunger": 20,
+    "saturation": 0.0,
+    "position": {
+      "x": -329.5,
+      "y": 85.0,
+      "z": 150.5
+    },
+    "dimension": "minecraft:overworld",
+    "biome": "minecraft:stony_shore",
+    "structures": [],
+    "equipment": {
+      "mainhand": {
+        "item": "minecraft:golden_apple"
+      }
+    },
+    "inventory": {
+      "items": [
+        {
+          "slot": 0,
+          "item": "minecraft:stone",
+          "count": 7
+        },
+        {
+          "slot": 1,
+          "item": "minecraft:stone",
+          "count": 3
+        },
+        {
+          "slot": 2,
+          "item": "minecraft:netherite_pickaxe",
+          "count": 1
+        },
+        {
+          "slot": 3,
+          "item": "minecraft:cobblestone",
+          "count": 63
+        },
+        {
+          "slot": 4,
+          "item": "minecraft:birch_log",
+          "count": 2
+        },
+        {
+          "slot": 5,
+          "item": "minecraft:iron_ingot",
+          "count": 15
+        },
+        {
+          "slot": 6,
+          "item": "minecraft:cobblestone",
+          "count": 64
+        },
+        {
+          "slot": 7,
+          "item": "minecraft:andesite",
+          "count": 9
+        },
+        {
+          "slot": 8,
+          "item": "minecraft:golden_apple",
+          "count": 1
+        },
+        {
+          "slot": 9,
+          "item": "minecraft:cobblestone",
+          "count": 24
+        },
+        {
+          "slot": 10,
+          "item": "minecraft:rotten_flesh",
+          "count": 1
+        },
+        {
+          "slot": 11,
+          "item": "minecraft:granite",
+          "count": 4
+        },
+        {
+          "slot": 12,
+          "item": "minecraft:diorite",
+          "count": 1
+        },
+        {
+          "slot": 35,
+          "item": "minecraft:birch_planks",
+          "count": 4
+        }
+      ],
+      "slots_used": 14,
+      "slots_total": 41
+    },
+    "target": null,
+    "on_ground": true,
+    "in_water": false,
+    "block_above": "minecraft:air",
+    "air": "300/300 ticks",
+    "in_lava": false,
+    "body_health": {
+      "degraded": false,
+      "consecutive_tick_errors": 0
+    }
+  },
+  "checkpoint": null
+}

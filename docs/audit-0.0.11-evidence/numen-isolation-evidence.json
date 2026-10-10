@@ -1,0 +1,168 @@
+[
+  {
+    "name": "setup",
+    "result": [
+      "The difficulty has been set to Peaceful\n",
+      "Set Actor's game mode to Creative Mode\n",
+      "Teleported Actor to -329.500000, 90.000000, 150.500000\n"
+    ]
+  },
+  {
+    "name": "concurrent_goto",
+    "result": [
+      {
+        "success": true,
+        "message": "已受理,后台执行中。用 task_status 轮询,身体转空闲即为完成,再用感知工具确认结果;task_stop 叫停。",
+        "data": {
+          "async": true,
+          "task": "goto",
+          "task_id": "t1"
+        }
+      },
+      {
+        "success": true,
+        "message": "已受理,后台执行中。用 task_status 轮询,身体转空闲即为完成,再用感知工具确认结果;task_stop 叫停。",
+        "data": {
+          "async": true,
+          "task": "goto",
+          "task_id": "t1"
+        }
+      }
+    ]
+  },
+  {
+    "name": "out_of_bounds",
+    "result": {
+      "success": false,
+      "message": "target outside max_action_distance"
+    }
+  },
+  {
+    "name": "task_stop_late",
+    "result": "stopped"
+  },
+  {
+    "name": "current_after_late_stop",
+    "result": {
+      "state": "running",
+      "task_id": "t1",
+      "detail": "goto -325,90,150",
+      "result": null
+    }
+  },
+  {
+    "name": "stop_current",
+    "result": "stopped"
+  },
+  {
+    "name": "release",
+    "result": "released"
+  },
+  {
+    "name": "final_status",
+    "result": {
+      "entity_id": 199,
+      "action_generation": 0,
+      "name": "Actor",
+      "game_mode": "creative",
+      "hp": 13.533337,
+      "max_hp": 20.0,
+      "hunger": 18,
+      "saturation": 0.0,
+      "position": {
+        "x": -329.5,
+        "y": 89.23152379758702,
+        "z": 150.5
+      },
+      "dimension": "minecraft:overworld",
+      "biome": "minecraft:stony_shore",
+      "structures": [],
+      "equipment": {
+        "mainhand": {
+          "item": "minecraft:golden_apple"
+        }
+      },
+      "inventory": {
+        "items": [
+          {
+            "slot": 0,
+            "item": "minecraft:netherite_pickaxe",
+            "count": 1
+          },
+          {
+            "slot": 1,
+            "item": "minecraft:netherite_pickaxe",
+            "count": 1
+          },
+          {
+            "slot": 2,
+            "item": "minecraft:netherite_pickaxe",
+            "count": 1
+          },
+          {
+            "slot": 3,
+            "item": "minecraft:cobblestone",
+            "count": 63
+          },
+          {
+            "slot": 4,
+            "item": "minecraft:birch_log",
+            "count": 3
+          },
+          {
+            "slot": 5,
+            "item": "minecraft:iron_ingot",
+            "count": 15
+          },
+          {
+            "slot": 6,
+            "item": "minecraft:cobblestone",
+            "count": 64
+          },
+          {
+            "slot": 7,
+            "item": "minecraft:andesite",
+            "count": 9
+          },
+          {
+            "slot": 8,
+            "item": "minecraft:golden_apple",
+            "count": 1
+          },
+          {
+            "slot": 9,
+            "item": "minecraft:cobblestone",
+            "count": 24
+          },
+          {
+            "slot": 10,
+            "item": "minecraft:rotten_flesh",
+            "count": 1
+          },
+          {
+            "slot": 11,
+            "item": "minecraft:granite",
+            "count": 4
+          },
+          {
+            "slot": 12,
+            "item": "minecraft:diorite",
+            "count": 1
+          }
+        ],
+        "slots_used": 13,
+        "slots_total": 41
+      },
+      "target": null,
+      "on_ground": false,
+      "in_water": false,
+      "block_above": "minecraft:air",
+      "air": "300/300 ticks",
+      "in_lava": false,
+      "body_health": {
+        "degraded": false,
+        "consecutive_tick_errors": 0
+      }
+    }
+  }
+]

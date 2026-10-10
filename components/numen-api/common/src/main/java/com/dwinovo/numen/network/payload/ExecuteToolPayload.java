@@ -95,6 +95,11 @@ public record ExecuteToolPayload(UUID entityUuid,
         com.dwinovo.numen.entity.NumenPlayer companion =
                 com.dwinovo.numen.entity.NumenPlayer.findByUuid(server, p.entityUuid());
         if (companion == null) {
+            var entry = com.dwinovo.numen.entity.CompanionRegistry.get(server).find(p.entityUuid());
+            if (entry == null || !player.getUUID().equals(entry.owner())) {
+                replyError(player, p, "not the owner or missing companion");
+                return;
+            }
             companion = com.dwinovo.numen.entity.Companions.respawn(server, p.entityUuid());
         }
         if (companion != null) {

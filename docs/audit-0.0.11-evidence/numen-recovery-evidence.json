@@ -1,0 +1,256 @@
+{
+  "server_id": "audit-recover-177a88e4",
+  "before_resume": {
+    "entity_id": 136,
+    "action_generation": 2,
+    "name": "Actor",
+    "game_mode": "survival",
+    "hp": 20.0,
+    "max_hp": 20.0,
+    "hunger": 20,
+    "saturation": 0.0,
+    "position": {
+      "x": -327.54502585819387,
+      "y": 100.0,
+      "z": 152.46086856066037
+    },
+    "dimension": "minecraft:overworld",
+    "biome": "minecraft:stony_shore",
+    "structures": [],
+    "equipment": {
+      "mainhand": {
+        "item": "minecraft:iron_pickaxe"
+      }
+    },
+    "inventory": {
+      "items": [
+        {
+          "slot": 0,
+          "item": "minecraft:iron_pickaxe",
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "item": "minecraft:coal",
+          "count": 1
+        },
+        {
+          "slot": 2,
+          "item": "minecraft:cooked_beef",
+          "count": 4
+        },
+        {
+          "slot": 3,
+          "item": "minecraft:iron_ingot",
+          "count": 1
+        },
+        {
+          "slot": 4,
+          "item": "minecraft:birch_log",
+          "count": 1
+        },
+        {
+          "slot": 8,
+          "item": "minecraft:birch_planks",
+          "count": 4
+        }
+      ],
+      "slots_used": 6,
+      "slots_total": 41
+    },
+    "target": null,
+    "on_ground": true,
+    "in_water": false,
+    "block_above": "minecraft:air",
+    "air": "300/300 ticks",
+    "in_lava": false,
+    "body_health": {
+      "degraded": false,
+      "consecutive_tick_errors": 0
+    }
+  },
+  "checkpoint_before": {
+    "state": "tool_completed",
+    "turn_id": "756258bd-62cd-4e3d-9cca-e33cff2c1984",
+    "action_generation": 2,
+    "user": "用1个白桦原木制作4个白桦木板，制作一次即可；调用 get_self_status 核验并回复，不要丢弃。",
+    "tool": "craft",
+    "task_id": null,
+    "terminal": null,
+    "transcript": [
+      {
+        "role": "user",
+        "content": "用1个白桦原木制作4个白桦木板，制作一次即可；调用 get_self_status 核验并回复，不要丢弃。"
+      },
+      {
+        "role": "assistant",
+        "content": "{\"arguments\": {}, \"name\": \"get_self_status\", \"type\": \"tool\"}"
+      },
+      {
+        "role": "user",
+        "content": "<tool_result name=\"get_self_status\">{\"dispatch\": {\"action_generation\": 2, \"air\": \"300/300 ticks\", \"biome\": \"minecraft:stony_shore\", \"block_above\": \"minecraft:air\", \"body_health\": {\"consecutive_tick_errors\": 0, \"degraded\": false}, \"dimension\": \"minecraft:overworld\", \"entity_id\": 136, \"equipment\": {\"mainhand\": {\"item\": \"minecraft:iron_pickaxe\"}}, \"game_mode\": \"survival\", \"hp\": 20.0, \"hunger\": 20, \"in_lava\": false, \"in_water\": false, \"inventory\": {\"items\": [{\"count\": 1, \"item\": \"minecraft:iron_pickaxe\", \"slot\": 0}, {\"count\": 1, \"item\": \"minecraft:coal\", \"slot\": 1}, {\"count\": 4, \"item\": \"minecraft:cooked_beef\", \"slot\": 2}, {\"count\": 1, \"item\": \"minecraft:iron_ingot\", \"slot\": 3}, {\"count\": 2, \"item\": \"minecraft:birch_log\", \"slot\": 4}], \"slots_total\": 41, \"slots_used\": 5}, \"max_hp\": 20.0, \"name\": \"Actor\", \"on_ground\": true, \"position\": {\"x\": -327.54502585819387, \"y\": 100.0, \"z\": 152.46086856066037}, \"saturation\": 0.0, \"structures\": [], \"target\": null}, \"name\": \"get_self_status\", \"task_id\": null, \"terminal\": null}</tool_result>"
+      },
+      {
+        "role": "assistant",
+        "content": "{\"arguments\": {\"count\": 1, \"item_id\": \"minecraft:birch_planks\"}, \"name\": \"craft\", \"type\": \"tool\"}"
+      },
+      {
+        "role": "user",
+        "content": "<tool_result name=\"craft\">{\"dispatch\": {\"data\": {\"carrying\": 4, \"crafted\": 4}, \"message\": \"crafted 4x birch_planks — used 1x birch_log. Used your own 2x2 grid. Now carrying 4x birch_planks.\", \"success\": true}, \"name\": \"craft\", \"task_id\": null, \"terminal\": null}</tool_result>"
+      }
+    ]
+  },
+  "recovered": {
+    "final": "已用 1 个白桦原木制作 4 个白桦木板，背包核验：birch_log 剩 1，birch_planks 4，未丢弃。",
+    "actions": [
+      {
+        "tool": "get_self_status",
+        "dispatch": {
+          "entity_id": 136,
+          "action_generation": 2,
+          "name": "Actor",
+          "game_mode": "survival",
+          "hp": 20.0,
+          "max_hp": 20.0,
+          "hunger": 20,
+          "saturation": 0.0,
+          "position": {
+            "x": -327.54502585819387,
+            "y": 100.0,
+            "z": 152.46086856066037
+          },
+          "dimension": "minecraft:overworld",
+          "biome": "minecraft:stony_shore",
+          "structures": [],
+          "equipment": {
+            "mainhand": {
+              "item": "minecraft:iron_pickaxe"
+            }
+          },
+          "inventory": {
+            "items": [
+              {
+                "slot": 0,
+                "item": "minecraft:iron_pickaxe",
+                "count": 1
+              },
+              {
+                "slot": 1,
+                "item": "minecraft:coal",
+                "count": 1
+              },
+              {
+                "slot": 2,
+                "item": "minecraft:cooked_beef",
+                "count": 4
+              },
+              {
+                "slot": 3,
+                "item": "minecraft:iron_ingot",
+                "count": 1
+              },
+              {
+                "slot": 4,
+                "item": "minecraft:birch_log",
+                "count": 1
+              },
+              {
+                "slot": 8,
+                "item": "minecraft:birch_planks",
+                "count": 4
+              }
+            ],
+            "slots_used": 6,
+            "slots_total": 41
+          },
+          "target": null,
+          "on_ground": true,
+          "in_water": false,
+          "block_above": "minecraft:air",
+          "air": "300/300 ticks",
+          "in_lava": false,
+          "body_health": {
+            "degraded": false,
+            "consecutive_tick_errors": 0
+          }
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      }
+    ],
+    "rounds": 2,
+    "history_before": 0,
+    "history_after": 8
+  },
+  "after_resume": {
+    "entity_id": 136,
+    "action_generation": 2,
+    "name": "Actor",
+    "game_mode": "survival",
+    "hp": 20.0,
+    "max_hp": 20.0,
+    "hunger": 20,
+    "saturation": 0.0,
+    "position": {
+      "x": -327.54502585819387,
+      "y": 100.0,
+      "z": 152.46086856066037
+    },
+    "dimension": "minecraft:overworld",
+    "biome": "minecraft:stony_shore",
+    "structures": [],
+    "equipment": {
+      "mainhand": {
+        "item": "minecraft:iron_pickaxe"
+      }
+    },
+    "inventory": {
+      "items": [
+        {
+          "slot": 0,
+          "item": "minecraft:iron_pickaxe",
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "item": "minecraft:coal",
+          "count": 1
+        },
+        {
+          "slot": 2,
+          "item": "minecraft:cooked_beef",
+          "count": 4
+        },
+        {
+          "slot": 3,
+          "item": "minecraft:iron_ingot",
+          "count": 1
+        },
+        {
+          "slot": 4,
+          "item": "minecraft:birch_log",
+          "count": 1
+        },
+        {
+          "slot": 8,
+          "item": "minecraft:birch_planks",
+          "count": 4
+        }
+      ],
+      "slots_used": 6,
+      "slots_total": 41
+    },
+    "target": null,
+    "on_ground": true,
+    "in_water": false,
+    "block_above": "minecraft:air",
+    "air": "300/300 ticks",
+    "in_lava": false,
+    "body_health": {
+      "degraded": false,
+      "consecutive_tick_errors": 0
+    }
+  },
+  "checkpoint_after": null
+}

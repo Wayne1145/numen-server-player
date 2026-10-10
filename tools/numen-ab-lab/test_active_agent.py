@@ -97,7 +97,7 @@ class RecoveryContext(FakeContext):
             raise RecoveryRequired("incomplete side-effect checkpoint exists")
         return super().run_turn(message)
 
-    def recover_turn(self):
+    def recover_turn(self, guidance=None):
         self.recover_calls += 1
         if self.recover_failures > 0:
             self.recover_failures -= 1
@@ -144,9 +144,8 @@ class RecoveryOnInterruptTest(unittest.TestCase):
             self.assertEqual(1, ctx.recover_calls, "应调用一次 recover_turn")
             self.assertFalse(ctx.cleared, "成功恢复不清除 checkpoint")
 
-    def test_repeated_recovery_failure_clears_bad_checkpoint(self):
-        # 回归：坏 checkpoint（模型生成无效参数）连续恢复失败 3 次后应被清除，
-        # 否则假人会被死循环卡死、无法响应新任务。
+    def test_repeated_recovery_failure_retains_checkpoint(self):
+        # 临时失败次数不能证明快照损坏，连续失败后仍保留待恢复任务。
         with tempfile.TemporaryDirectory() as tmp:
             cursor = EventCursor(Path(tmp) / "cursor.json")
             cursor.save(fingerprint(chat("ABBrain 你好", time="1")))
@@ -164,12 +163,13 @@ class RecoveryOnInterruptTest(unittest.TestCase):
             for i in range(3):
                 ctx.events = [chat("ABBrain 触发%d" % i, time=str(2 + i))]
                 cursor.save(fingerprint(chat("ABBrain 你好", time="1")))
+                cursor.path.with_suffix(".retry.json").unlink(missing_ok=True)
                 try:
                     agent.run_once("ABBrain")
                 except RecoveryRequired:
                     pass
             self.assertGreaterEqual(ctx.recover_calls, 3, "应尝试恢复至少3次")
-            self.assertTrue(ctx.cleared, "连续失败3次后应清除 checkpoint")
+            self.assertFalse(ctx.cleared, "连续失败不得删除未完成 checkpoint")
 
 
 class ActiveAgentTest(unittest.TestCase):
@@ -264,8 +264,8 @@ class ActiveAgentTest(unittest.TestCase):
                 agent.run_once("ABBrain")
             # 关键断言：即使回合抛异常，cursor 也已推进到最新事件
             self.assertEqual(fingerprint(chat("ABBrain 帮我砍树", time="2")), cursor.load())
-            # inbox 也被清空，不会残留事件
-            self.assertEqual([], ctx.inbox.read())
+            # 游标记已接收，durable inbox 保留失败输入供重试，不能静默丢失。
+            self.assertEqual(1, len(ctx.inbox.read()))
 
     def test_cooldown_does_not_advance_cursor(self):
         # cooldown 跳过的轮次不应推进 cursor，事件留给下次重试。

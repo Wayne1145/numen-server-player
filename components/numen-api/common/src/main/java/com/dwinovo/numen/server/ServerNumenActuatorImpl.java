@@ -42,6 +42,7 @@ public final class ServerNumenActuatorImpl implements ServerNumenActuator {
     public static final ServerNumenActuatorImpl INSTANCE = new ServerNumenActuatorImpl();
 
     private volatile MinecraftServer server;
+    private IdempotentDispatchRegistry journal;
     private volatile SecurityPolicy policy = SecurityPolicy.defaults();
     private volatile AuthTokens tokens = AuthTokens.empty();
     private final LeaseRegistry leases = new LeaseRegistry();
@@ -53,7 +54,13 @@ public final class ServerNumenActuatorImpl implements ServerNumenActuator {
 
     private ServerNumenActuatorImpl() {}
 
-    public void attach(MinecraftServer server) { this.server = server; }
+    public void attach(MinecraftServer server) {
+        this.server = server;
+        ActionGeneration.configure(server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                .resolve("numen-cancel-fence"));
+        this.journal = new IdempotentDispatchRegistry(server.getWorldPath(
+                net.minecraft.world.level.storage.LevelResource.ROOT).resolve("numen-dispatch"));
+    }
     public void detach() { this.server = null; }
 
     /** Apply loaded config (policy + tokens) and rebuild the rate limiters. */
@@ -235,6 +242,19 @@ public final class ServerNumenActuatorImpl implements ServerNumenActuator {
                                                 String toolName, JsonObject arguments) {
         long t0 = System.currentTimeMillis();
         return onMainThread(s -> {
+            UUID owner = ownerOf(s, companionId);
+            if (owner == null) return fail(principal, companionId, toolName, leaseId, t0, "no_companion", "no such companion");
+            ToolCapability requested = ToolCatalog.of(toolName);
+            if (requested.requiresControl() ? !principal.canControl(owner) : !principal.canRead(owner))
+                return fail(principal, companionId, toolName, leaseId, t0, "not_owner", "principal not permitted");
+            var entry = CompanionRegistry.get(s).find(companionId);
+            var live = NumenPlayer.findByUuid(s, companionId);
+            String knownDim = live != null ? live.level().dimension().location().toString()
+                    : entry.dimension().location().toString();
+            var precheck = policy.permitInvoke(principal, toolName, knownDim);
+            if (!precheck.allowed()) return fail(principal, companionId, toolName, leaseId, t0, precheck.code(), precheck.reason());
+            if (requested.requiresControl() && !leases.isValidForWrite(companionId, principal, leaseId, System.currentTimeMillis()))
+                return fail(principal, companionId, toolName, leaseId, t0, "no_lease", "invalid control lease");
             NumenPlayer self = resolve(s, companionId);
             if (self == null) return fail(principal, companionId, toolName, leaseId, t0, "no_companion",
                     "no such companion (never summoned, or its data is gone)");
@@ -276,6 +296,42 @@ public final class ServerNumenActuatorImpl implements ServerNumenActuator {
             NumenTool tool = ToolRegistry.get(toolName);
             if (tool == null) return fail(principal, companionId, toolName, leaseId, t0, "unknown_tool", "unknown tool: " + toolName);
 
+            JsonObject clean = arguments == null ? new JsonObject() : arguments.deepCopy();
+            String actionKey = clean.has("client_action_id") ? clean.remove("client_action_id").getAsString() : null;
+            if (cap.requiresControl() && clean.has("action_generation")) {
+                long generation = clean.remove("action_generation").getAsLong();
+                if (!ActionGeneration.matches(companionId, generation))
+                    return fail(principal, companionId, toolName, leaseId, t0, "cancelled_generation", "stale action generation: cancelled");
+            }
+            String distanceError = policy.distanceViolation(clean, self.getX(), self.getY(), self.getZ());
+            if (distanceError != null) return fail(principal, companionId, toolName, leaseId, t0, "distance", distanceError);
+            String fp = principal.id() + "/" + principal.role() + "/" + principal.ownerUuid() + "/" + toolName + "/" + canonical(clean);
+            return journal.execute(companionId, actionKey, fp,
+                    () -> dispatchAuthorized(principal, companionId, leaseId, toolName, clean, self, tool, t0));
+        });
+    }
+
+    private static String canonical(com.google.gson.JsonElement value) {
+        if (value.isJsonObject()) {
+            var object = new JsonObject();
+            value.getAsJsonObject().keySet().stream().sorted().forEach(k ->
+                    object.add(k, com.google.gson.JsonParser.parseString(canonical(value.getAsJsonObject().get(k)))));
+            return object.toString();
+        }
+        if (value.isJsonArray()) {
+            var array = new com.google.gson.JsonArray();
+            for (var item : value.getAsJsonArray()) array.add(com.google.gson.JsonParser.parseString(canonical(item)));
+            return array.toString();
+        }
+        return value.toString();
+    }
+
+    private ToolResult dispatchAuthorized(McpPrincipal principal, UUID companionId, String leaseId,
+            String toolName, JsonObject arguments, NumenPlayer self, NumenTool tool, long t0) {
+            if (ToolCatalog.of(toolName).requiresControl()) {
+                ActionBounds.register(companionId, self.level().dimension().location().toString(),
+                        self.getX(), self.getY(), self.getZ(), policy.maxActionDistance());
+            }
             String toolCallId = "mcp-" + UUID.randomUUID();
             String[] captured = new String[1];
             String queryId = "q" + QUERY_IDS.incrementAndGet();
@@ -307,7 +363,6 @@ public final class ServerNumenActuatorImpl implements ServerNumenActuator {
             audit.record(rec(principal.id(), "actuator", companionId, toolName, tr.taskId(), leaseId,
                     System.currentTimeMillis() - t0, tr.ok(), tr.ok() ? "ok" : "tool_fail"));
             return tr;
-        });
     }
 
     private ToolResult fail(McpPrincipal p, UUID companion, String tool, String leaseId, long t0,
@@ -369,6 +424,13 @@ public final class ServerNumenActuatorImpl implements ServerNumenActuator {
                 audit.record(rec(principal.id(), "actuator", companionId, "task_stop", taskId, null,
                         System.currentTimeMillis() - t0, false, "not_permitted"));
                 throw new IllegalStateException("not authorized");
+            }
+            TaskRecord current = CompanionTickDispatcher.asyncTaskFor(companionId);
+            if (taskId != null && !taskId.isBlank()
+                    && !TaskStopGuard.matches(taskId, current == null ? null : current.publicId())) {
+                audit.record(rec(principal.id(), "actuator", companionId, "task_stop", taskId, null,
+                        System.currentTimeMillis() - t0, true, "already_finished_or_not_current"));
+                return null;
             }
             CompanionTickDispatcher.stopActive(self, "stopped by actuator (" + principal.id() + ")");
             audit.record(rec(principal.id(), "actuator", companionId, "task_stop", taskId, null,

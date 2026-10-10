@@ -87,7 +87,7 @@ MCP 和 API Agent 不是两套旁路。它们最终使用相同的动作、权�
 
 ## 构建
 
-> **重要**：`minecraft-numen` 依赖 fork 的引擎 `numen-api-common-1.20.1:0.0.7-fix3`。
+> **重要**：`minecraft-numen` 依赖 fork 的引擎 `numen-api-common-1.20.1:0.0.7-fix4`。
 > 公共回退源是**本仓库的 `maven/` 目录**（`raw.githubusercontent.com/Wayne1145/numen-server-player/main/maven`），
 > 其中已发布 fork 引擎产物（含服务端增强）。两种构建方式任选：
 
@@ -112,7 +112,7 @@ cd components/minecraft-numen
 ```bash
 # 1. 构建并发布引擎到仓库内本地 Maven 目录
 cd components/numen-api
-./gradlew :common:build :common:publish :forge:build :forge:publish \
+./gradlew :common:build :common:publish :forge:build :forge:publish :fabric:publish \
   -Plocal_maven_url="$(realpath ../../local-maven)" \
   --no-daemon --console=plain
 

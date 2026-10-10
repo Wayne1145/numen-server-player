@@ -1,0 +1,28 @@
+{
+  "before": {
+    "success": true,
+    "message": "GUI: InventoryMenu (YOUR own inventory — includes the 2x2 crafting grid below)\ncrafting grid 2x2 — put each recipe ingredient into the slot at the SAME position (a recipe smaller than the grid goes in the top-left); take the result from slot 0:\n  slot 1=-  |  slot 2=-\n  slot 3=-  |  slot 4=-\ncontainer slots:\n  (none)\nyour inventory (non-empty):\n  9: cobblestone x24\n  10: rotten_flesh x1\n  11: granite x4\n  12: diorite x1\n  36: stone x10\n  38: netherite_pickaxe x1\n  39: cobblestone x63\n  40: birch_log x3\n  41: iron_ingot x15\n  42: cobblestone x64\n  43: andesite x9\n  44: golden_apple x1\ncursor: -\ntip: transfer {from} (no `to`) routes a whole stack to the other section; add `to` + `count` for an exact move into a specific slot."
+  },
+  "first": {
+    "success": true,
+    "message": "1. moved 3 stone from slot 36 to slot 37 (slot 37 now 3; 7 left in slot 36)."
+  },
+  "after_first": {
+    "success": true,
+    "message": "GUI: InventoryMenu (YOUR own inventory — includes the 2x2 crafting grid below)\ncrafting grid 2x2 — put each recipe ingredient into the slot at the SAME position (a recipe smaller than the grid goes in the top-left); take the result from slot 0:\n  slot 1=-  |  slot 2=-\n  slot 3=-  |  slot 4=-\ncontainer slots:\n  (none)\nyour inventory (non-empty):\n  9: cobblestone x24\n  10: rotten_flesh x1\n  11: granite x4\n  12: diorite x1\n  36: stone x7\n  37: stone x3\n  38: netherite_pickaxe x1\n  39: cobblestone x63\n  40: birch_log x3\n  41: iron_ingot x15\n  42: cobblestone x64\n  43: andesite x9\n  44: golden_apple x1\ncursor: -\ntip: transfer {from} (no `to`) routes a whole stack to the other section; add `to` + `count` for an exact move into a specific slot."
+  },
+  "retry": {
+    "success": true,
+    "message": "1. moved 3 stone from slot 36 to slot 37 (slot 37 now 3; 7 left in slot 36)."
+  },
+  "after_retry": {
+    "success": true,
+    "message": "GUI: InventoryMenu (YOUR own inventory — includes the 2x2 crafting grid below)\ncrafting grid 2x2 — put each recipe ingredient into the slot at the SAME position (a recipe smaller than the grid goes in the top-left); take the result from slot 0:\n  slot 1=-  |  slot 2=-\n  slot 3=-  |  slot 4=-\ncontainer slots:\n  (none)\nyour inventory (non-empty):\n  9: cobblestone x24\n  10: rotten_flesh x1\n  11: granite x4\n  12: diorite x1\n  36: stone x7\n  37: stone x3\n  38: netherite_pickaxe x1\n  39: cobblestone x63\n  40: birch_log x3\n  41: iron_ingot x15\n  42: cobblestone x64\n  43: andesite x9\n  44: golden_apple x1\ncursor: -\ntip: transfer {from} (no `to`) routes a whole stack to the other section; add `to` + `count` for an exact move into a specific slot."
+  },
+  "argument_conflict": {
+    "rpc_error": {
+      "code": -32603,
+      "message": "internal error: client_action_id conflict: principal/tool/arguments differ"
+    }
+  }
+}

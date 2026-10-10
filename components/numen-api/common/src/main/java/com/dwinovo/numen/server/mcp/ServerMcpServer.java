@@ -269,7 +269,7 @@ public final class ServerMcpServer {
         tools.add(tool("release_control", "Release a previously-acquired lease.", objSchema(true, true)));
         tools.add(tool("task_status", "Read the companion's active task, or query a retained terminal result by task_id.",
                 taskStatusSchema()));
-        tools.add(tool("task_stop", "Abort the companion's background task.", objSchema(true, true)));
+        tools.add(tool("task_stop", "Abort only the matching task_id; omit it to stop the current task.", taskStatusSchema()));
         // Engine tools, filtered by capability policy (whitelist only; destructive only if enabled).
         for (NumenTool t : ToolRegistry.all()) {
             // 管理工具由上方 MCP 层提供；同名引擎工具会制造重复 Schema，并让客户端随机选中旧契约。
@@ -357,31 +357,8 @@ public final class ServerMcpServer {
         JsonObject toolArgs = args.deepCopy();
         toolArgs.remove("companion");
         toolArgs.remove("lease_id");
-        // 幂等派发：client_action_id 由外部大脑生成；命中注册表直接返回原 task_id，
-        // 不重复派发 —— 关闭“动作已受理但回执丢失”的 dispatch_unknown 窗口。
-        String clientActionId = asString(toolArgs.get("client_action_id"));
-        if (clientActionId != null) {
-            toolArgs.remove("client_action_id");
-            String existing = IdempotentDispatchRegistry.lookup(id, clientActionId);
-            if (existing != null) {
-                JsonObject o = new JsonObject();
-                o.addProperty("success", true);
-                JsonObject data = new JsonObject();
-                data.addProperty("task_id", existing);
-                data.addProperty("task", tool);
-                data.addProperty("async", true);
-                data.addProperty("idempotent", true);
-                o.add("data", data);
-                return content(o.toString(), false);
-            }
-        }
+        // 幂等必须在 actuator 授权、租约校验之后执行，HTTP 不得绕过安全门。
         ToolResult r = await(actuator.invoke(principal, id, lease, tool, toolArgs));
-        if (clientActionId != null) {
-            String taskId = extractTaskId(r.json());
-            if (taskId != null) {
-                IdempotentDispatchRegistry.record(id, clientActionId, taskId);
-            }
-        }
         return content(r.json(), !r.ok());
     }
 

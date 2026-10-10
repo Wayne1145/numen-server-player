@@ -276,6 +276,8 @@ public final class DebugCommands {
         if (companion == null) {
             return 0;
         }
+        com.dwinovo.numen.server.ActionGeneration.cancel(companion.getUUID());
+        com.dwinovo.numen.server.ServerNumenActuatorImpl.INSTANCE.leases().releaseAll(companion.getUUID());
         CompanionTickDispatcher.stopActive(companion, "stopped by command");
         // 通知外部大脑：玩家明确叫停 → 大脑清除 checkpoint，不再自动恢复旧回合。
         // detail 带 @名字 保证 active agent 的 mention_words 能命中触发。

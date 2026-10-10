@@ -1,0 +1,6 @@
+concurrent_reply_1={"content":[{"type":"text","text":"{\"success\":true,\"data\":{\"task_id\":\"t1\"}}"}],"isError":false}
+concurrent_reply_2={"content":[{"type":"text","text":"{\"success\":true,\"data\":{\"task_id\":\"t2\"}}"}],"isError":false}
+same_action_invocations=2
+cross_principal_different_tool_hit={"content":[{"type":"text","text":"{\"success\":true,\"data\":{\"task_id\":\"t1\",\"task\":\"mine\",\"async\":true,\"idempotent\":true}}"}],"isError":false}
+actuator_calls_on_hit=0
+same_sync_transfer_invocations=2

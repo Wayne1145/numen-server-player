@@ -1,28 +1,35 @@
-# maven/
+# 公共 Maven 构件
 
-Fork 引擎的公共 Maven 产物（raw maven 布局，Gradle 可直接作为 maven 仓库）。
+本目录是 fork 引擎的公共 raw Maven 仓库，要随源码提交；`components/local-maven/` 只是被忽略的本机构建缓存。
 
-坐标：`com.dwinovo.numen:numen-api-common-1.20.1:0.0.7-fix3`（及 `numen-api-forge-1.20.1`）
+当前版本 `0.0.7-fix4`，包含 common、forge、fabric 三个模块：
 
-Maven 仓库 URL（`multiloader-common.gradle` 的 `numenRemote` 已指向这里）：
+- `com.dwinovo.numen:numen-api-common-1.20.1:0.0.7-fix4`
+- `com.dwinovo.numen:numen-api-forge-1.20.1:0.0.7-fix4`
+- `com.dwinovo.numen:numen-api-fabric-1.20.1:0.0.7-fix4`
 
-```
-https://raw.githubusercontent.com/Wayne1145/numen-server-player/main/maven
-```
+公共源：`https://raw.githubusercontent.com/Wayne1145/numen-server-player/main/maven`。
+Fabric 构件用于 Gradle 配置阶段依赖解析，不代表 Fabric 运行行为已验收。
 
-## 更新方法
+## 更新
 
-引擎代码有改动时：
+从仓库根执行：
 
 ```bash
+# 发布全部被工程配置引用的模块，避免只构建 Forge 时 Fabric 配置阶段缺依赖。
 cd components/numen-api
-./gradlew :common:publish :forge:publish \
-  -Plocal_maven_url="$(realpath ../../local-maven)" --no-daemon --console=plain
-
-# 同步到公共 maven 目录（只保留当前发布版本，历史版本可删）
-cp -r ../../local-maven/com maven/com
-# 更新 maven/com/dwinovo/numen/*/maven-metadata.xml 的版本列表
-git add maven && git commit && git push
+./gradlew :common:publish :forge:publish :fabric:publish --no-daemon --console=plain
+cd ../..
+# 默认发布路径相对引擎工程根解析，实际为 components/local-maven/。
+# 保留历史版本，复制新版本目录与对应 maven-metadata.xml 及校验侧车。
+cp -r components/local-maven/com/. maven/com/
+# 引擎改变后 clean 重建；门禁校验 jarJar 与本次公共发布源完全一致。
+cd components/minecraft-numen
+./gradlew clean :common:test :forge:build --no-daemon --console=plain
+cd ../..
+python3 tools/verify_release.py \
+  components/minecraft-numen/forge/build/libs/numen-forge-1.20.1-0.0.11-all.jar \
+  maven/com/dwinovo/numen/numen-api-forge-1.20.1/0.0.7-fix4/numen-api-forge-1.20.1-0.0.7-fix4.jar
 ```
 
-注意：`local-maven/` 目录本身被 gitignore（本地发布缓存）；`maven/` 目录是**要提交**的公共产物。
+网络代理、JDK 与平台适配属于本机环境；不要把关闭 ForgeGradle 证书环境检查当成默认安全配置。校验 SHA 不能代替依赖漏洞审计。

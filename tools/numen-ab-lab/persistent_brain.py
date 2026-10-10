@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import fcntl
+from functools import wraps
 import os
 import re
 import uuid
@@ -36,6 +38,22 @@ def _reject_path_separators(*values: str) -> None:
             raise ValueError(f"identity contains a path separator: {value!r}")
 
 
+def locked_session_write(method):
+    """单个会话写锁覆盖修复、重载、去重与刷盘，不依赖 Context 缓存。"""
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.with_suffix('.write.lock').open('a+b') as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                self._repair_tail()
+                self.reload()
+                return method(self, *args, **kwargs)
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    return wrapped
+
+
 class BrainSessionStore:
     """以 server_id + companion UUID 分区的追加式 JSONL 会话。
 
@@ -53,7 +71,46 @@ class BrainSessionStore:
         self._records: list[dict[str, Any]] = []
         self._load()
 
+    def _repair_tail(self) -> None:
+        """仅修复末尾未完成事务；先持久备份，再截断，不掩盖中段损坏。"""
+        if not self.path.exists():
+            return
+        data = self.path.read_bytes()
+        offset = 0
+        for index, line in enumerate(data.splitlines(keepends=True)):
+            try:
+                if line.strip():
+                    json.loads(line.decode('utf-8'))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                if offset + len(line) != len(data):
+                    raise ValueError('corrupt session record before tail')
+                backup = self.path.with_name(self.path.name + '.corrupt-' + uuid.uuid4().hex)
+                with backup.open('wb') as handle:
+                    handle.write(data[offset:])
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                with self.path.open('r+b') as handle:
+                    handle.truncate(offset)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                fsync_dir(self.path.parent)
+                return
+            offset += len(line)
+        if data and not data.endswith(b'\n'):
+            with self.path.open('ab') as handle:
+                handle.write(b'\n')
+                handle.flush()
+                os.fsync(handle.fileno())
+
+    def reload(self) -> None:
+        """持有同伴进程锁后刷新，禁止以旧事务缓存判断跨进程提交。"""
+        self._records.clear()
+        self._transactions.clear()
+        self._load()
+
     def _load(self) -> None:
+        self._records.clear()
+        self._transactions.clear()
         if not self.path.exists():
             return
         lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -85,6 +142,7 @@ class BrainSessionStore:
                 self._records.append(
                     {"role": message["role"], "content": message["content"]})
 
+    @locked_session_write
     def append(self, role: str, content: str) -> None:
         if role not in VALID_ROLES:
             raise ValueError(f"invalid role: {role}")
@@ -93,6 +151,7 @@ class BrainSessionStore:
         message = {"role": role, "content": content}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         encoded = json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n"
+        self._repair_tail()
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(encoded)
             handle.flush()
@@ -106,6 +165,7 @@ class BrainSessionStore:
             {"role": "assistant", "content": assistant_content},
         ])
 
+    @locked_session_write
     def append_batch(self, messages: list[dict[str, str]],
                      transaction_id: str | None = None) -> None:
         """一次刷盘提交一个完整行动回合，避免只持久化其中一部分。"""
@@ -127,6 +187,7 @@ class BrainSessionStore:
         if transaction_id is not None:
             record["transaction_id"] = transaction_id
         encoded = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+        self._repair_tail()
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(encoded)
             handle.flush()
@@ -135,6 +196,7 @@ class BrainSessionStore:
         if transaction_id is not None:
             self._transactions.add(transaction_id)
 
+    @locked_session_write
     def append_summary(self, content: str, transaction_id: str | None = None) -> None:
         """追加一条上下文摘要；模型可见视图将从这条摘要开始。"""
         if not isinstance(content, str) or not content.strip():
@@ -146,6 +208,7 @@ class BrainSessionStore:
             record["transaction_id"] = transaction_id
         self.path.parent.mkdir(parents=True, exist_ok=True)
         encoded = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+        self._repair_tail()
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(encoded)
             handle.flush()
@@ -155,6 +218,7 @@ class BrainSessionStore:
             self._transactions.add(transaction_id)
 
     def has_transaction(self, transaction_id: str) -> bool:
+        self.reload()
         return transaction_id in self._transactions
 
     def summary(self) -> str | None:

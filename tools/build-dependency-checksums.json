@@ -1,0 +1,18 @@
+[
+  {
+    "coordinate_path": "net.fabricmc/fabric-loom/1.6.12/bbeb092b3150f39cce1d71b4c78880e2de68ed48/fabric-loom-1.6.12.jar",
+    "sha256": "d39c104234096008515195a9218a7a4ef1886b102574b93d92f080ded3b65004"
+  },
+  {
+    "coordinate_path": "net.minecraftforge.gradle/ForgeGradle/6.0.54/abfc5f1f905524349236e01ee686f7359a5dbd4e/ForgeGradle-6.0.54.jar",
+    "sha256": "1d54a97a225ed5180300e8070a1c818597d98ec45a11fedecb425254b7982da2"
+  },
+  {
+    "coordinate_path": "org.spongepowered/vanillagradle/0.2.1-SNAPSHOT/b69a836d608ddc070400ea94dbcd0f4602fa678b/vanillagradle-0.2.1-SNAPSHOT.jar",
+    "sha256": "399c12e251b0691cacd09022955aa3d07145601dbf8975fb890308e0c9c236b7"
+  },
+  {
+    "coordinate_path": "org.spongepowered/mixingradle/0.7-SNAPSHOT/e08d649b5b3510db0e3a6033f182b5482c2a6d9/mixingradle-0.7-SNAPSHOT.jar",
+    "sha256": "61d4dd3a40eeaf126ac9c5ffdea74c284dfcb34a38baa256f7c99d023a0a04a9"
+  }
+]

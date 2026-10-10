@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import hmac
+import ipaddress
+import secrets
 import json
 import re
 import threading
@@ -15,6 +18,7 @@ from action_brain import (
     ActionBrainRuntime,
     CompanionRunLock,
     TurnCheckpoint,
+    TurnCancelled,
     resolve_companion_id,
 )
 from brain_runner import McpClient, model_tools
@@ -83,34 +87,77 @@ class CompanionContext:
             store=self.store,
             checkpoint=TurnCheckpoint(paths["checkpoint"]),
             mcp=mcp,
-            companion=companion,
+            companion=self.companion_id,
             model=create_model_adapter(live_transport, persona=self.persona_text),
             tools=[*tools, *local_schemas],
             requires_control=requires_control,
             local_tools=local_tools,
             # 复合生存任务常需十余步；真循环由专项 guard 快速中断。
             max_rounds=24,
+            event_boundary=self._event_boundary,
         )
         self.lock = threading.Lock()
+        self._boundary_seen: set[str] = set()
 
     def list_companions(self) -> str:
         return self.listing_text
 
     def list_recent_events(self, count: int = 50) -> list[dict[str, Any]]:
         result = self.mcp.call("get_recent_events",
-                               {"companion": self.companion, "count": count})
+                               {"companion": self.companion_id, "count": count})
         if isinstance(result, dict) and isinstance(result.get("events"), list):
             return result["events"]
         return []
 
     def get_self_status(self) -> dict[str, Any]:
-        result = self.mcp.call("get_self_status", {"companion": self.companion})
+        result = self.mcp.call("get_self_status", {"companion": self.companion_id})
         return result if isinstance(result, dict) else {}
+
+    def _event_boundary(self) -> str:
+        from active_agent import fingerprint, _guidance_from_events
+        # 模型等待时每两秒泵一次；派发前仍会核 generation，服务端兜住竞态。
+        import time
+        now = time.monotonic()
+        if now - getattr(self, "_last_event_check", -10) < 2:
+            return ""
+        self._last_event_check = now
+        status = self.get_self_status()
+        generation = status.get("action_generation")
+        if generation is not None and getattr(self, "_action_generation", generation) != generation:
+            raise TurnCancelled("服务端取消围栏已变化")
+        if generation is not None:
+            self.runtime.action_generation = generation
+        events = list(reversed(self.list_recent_events(count=50)))
+        fresh = [e for e in events if fingerprint(e) not in self._boundary_seen]
+        targeted = [e for e in fresh if str(e.get("detail", "")).startswith("@" + self.companion + " ")]
+        if any(e.get("kind") == "cancel" for e in targeted):
+            # 不消费事件；外层 Agent 持久处理 cancel 与其后的新聊天。
+            raise TurnCancelled("玩家已取消当前回合")
+        guidance = [e for e in targeted if e.get("kind") == "chat"]
+        for e in guidance:
+            self.inbox.push(e)
+        self._boundary_seen.update(fingerprint(e) for e in fresh)
+        self._consumed_event_fingerprints = set(self._boundary_seen)
+        return _guidance_from_events(guidance)
+
+    def _refresh_locked(self) -> None:
+        for store in (self.store, getattr(self, "memory", None)):
+            if hasattr(store, "reload"):
+                store.reload()
+        if hasattr(self, "mcp"):
+            status = self.get_self_status()
+            self._action_generation = status.get("action_generation")
+            self.runtime.action_generation = self._action_generation
+            self._last_event_check = -10
+            from active_agent import fingerprint
+            self._boundary_seen = {fingerprint(e) for e in self.list_recent_events(count=50)}
+            self._consumed_event_fingerprints = set(self._boundary_seen)
 
     def run_turn(self, message: str) -> dict[str, Any]:
         with self.lock:
             try:
                 with CompanionRunLock(self.lock_path):
+                    self._refresh_locked()
                     if self.store.should_compact(max_messages=COMPACT_MAX_MESSAGES,
                                                  max_chars=COMPACT_MAX_CHARS):
                         compact_history(self.store, create_compactor(live_transport))
@@ -130,9 +177,10 @@ class CompanionContext:
     def recover_turn(self, guidance: str | None = None) -> dict[str, Any]:
         with self.lock:
             with CompanionRunLock(self.lock_path):
+                self._refresh_locked()
                 before = len(self.store.messages())
                 result = self.runtime.recover_turn(guidance=guidance)
-                return {"final": result["final"], "actions": result.get("actions", []),
+                return {**result, "final": result.get("final", ""), "actions": result.get("actions", []),
                         "history_before": before, "history_after": len(self.store.messages())}
 
     def history(self) -> list[dict[str, str]]:
@@ -149,14 +197,21 @@ def make_handler(context_factory: Callable[[str, str | None, str | None], Compan
                  token: str, static_dir: Path) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def _auth(self) -> bool:
-            # 两种方式二选一：
-            # 1) Authorization: Bearer <token>（API/前端 fetch 用）
-            # 2) URL 查询参数 ?token=<token>（浏览器地址栏直达用，方便一键打开）
-            header = self.headers.get("Authorization", "")
-            if header == "Bearer " + token:
+            # Bearer-only，避免 URL/history/referrer 泄漏；空 token 仅允许回环启动。
+            if not token:
                 return True
-            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            return query.get("token", [""])[0] == token
+            header = self.headers.get("Authorization", "")
+            return hmac.compare_digest(header, "Bearer " + token)
+
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(10)
+
+        def end_headers(self):
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            super().end_headers()
 
         def _json(self, status: int, payload: Any) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -216,7 +271,20 @@ def make_handler(context_factory: Callable[[str, str | None, str | None], Compan
                 self._json(404, {"error": "not found"})
                 return
             route, params, _ = parsed
-            body = self._read_body()
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if self.headers.get("Transfer-Encoding") or length < 0:
+                    self._json(400, {"error": "invalid request framing"})
+                    return
+                if length > 65536:
+                    self._json(413, {"error": "request body too large"})
+                    return
+                body = self._read_body()
+                if not isinstance(body, dict):
+                    raise ValueError("body must be an object")
+            except (ValueError, UnicodeDecodeError, TimeoutError):
+                self._json(400, {"error": "invalid request body"})
+                return
             if route == "turns":
                 try:
                     ctx = context_factory(
@@ -278,14 +346,38 @@ def make_handler(context_factory: Callable[[str, str | None, str | None], Compan
     return Handler
 
 
+class BoundedHTTPServer(ThreadingHTTPServer):
+    """最多八个请求线程，忙时拒绝；socket 超时由 Handler 限制。"""
+    daemon_threads = True
+    def __init__(self, *args):
+        self._slots = threading.BoundedSemaphore(8)
+        super().__init__(*args)
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
 class BrainServer:
     """带认证的常驻 HTTP 服务；port=0 时使用随机端口（测试用）。"""
 
     def __init__(self, *, host: str, port: int, token: str,
                  factory: Callable[[str, str | None, str | None], CompanionContext],
                  static_dir: Path) -> None:
+        if host != "localhost" and not ipaddress.ip_address(host).is_loopback:
+            raise ValueError("BrainServer only supports loopback; use an authenticated tunnel")
         handler = make_handler(factory, token, static_dir)
-        self._httpd = ThreadingHTTPServer((host, port), handler)
+        self._httpd = BoundedHTTPServer((host, port), handler)
 
     def start(self) -> None:
         thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
@@ -320,7 +412,7 @@ def main() -> None:
                          factory=factory, static_dir=Path(args.static_dir))
     server.start()
     url = f"http://{args.host}:{server.bound_port()}"
-    direct = f"{url}/?token={args.token}" if args.token else url
+    direct = url + ("/#token=" + urllib.parse.quote(args.token) if args.token else "")
     print(json.dumps({
         "status": "up",
         "url": url,

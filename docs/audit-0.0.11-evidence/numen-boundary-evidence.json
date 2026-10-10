@@ -1,0 +1,139 @@
+{
+  "guidance_command": "已把消息发给 AI 大脑: 继续原任务，不要移动；请在最后答复中包含验收口令“月读验收”。\n",
+  "guided_result": {
+    "final": "背包中白桦木板（minecraft:birch_planks）数量为 4（位于槽位 35）。未移动、未改动物品。月读验收。",
+    "actions": [
+      {
+        "tool": "get_self_status",
+        "dispatch": {
+          "entity_id": 199,
+          "action_generation": 1,
+          "name": "Actor",
+          "game_mode": "creative",
+          "hp": 20.0,
+          "max_hp": 20.0,
+          "hunger": 20,
+          "saturation": 0.0,
+          "position": {
+            "x": -329.5,
+            "y": 85.0,
+            "z": 150.5
+          },
+          "dimension": "minecraft:overworld",
+          "biome": "minecraft:stony_shore",
+          "structures": [],
+          "equipment": {
+            "mainhand": {
+              "item": "minecraft:golden_apple"
+            }
+          },
+          "inventory": {
+            "items": [
+              {
+                "slot": 0,
+                "item": "minecraft:stone",
+                "count": 7
+              },
+              {
+                "slot": 1,
+                "item": "minecraft:stone",
+                "count": 3
+              },
+              {
+                "slot": 2,
+                "item": "minecraft:netherite_pickaxe",
+                "count": 1
+              },
+              {
+                "slot": 3,
+                "item": "minecraft:cobblestone",
+                "count": 63
+              },
+              {
+                "slot": 4,
+                "item": "minecraft:birch_log",
+                "count": 2
+              },
+              {
+                "slot": 5,
+                "item": "minecraft:iron_ingot",
+                "count": 15
+              },
+              {
+                "slot": 6,
+                "item": "minecraft:cobblestone",
+                "count": 64
+              },
+              {
+                "slot": 7,
+                "item": "minecraft:andesite",
+                "count": 9
+              },
+              {
+                "slot": 8,
+                "item": "minecraft:golden_apple",
+                "count": 1
+              },
+              {
+                "slot": 9,
+                "item": "minecraft:cobblestone",
+                "count": 24
+              },
+              {
+                "slot": 10,
+                "item": "minecraft:rotten_flesh",
+                "count": 1
+              },
+              {
+                "slot": 11,
+                "item": "minecraft:granite",
+                "count": 4
+              },
+              {
+                "slot": 12,
+                "item": "minecraft:diorite",
+                "count": 1
+              },
+              {
+                "slot": 35,
+                "item": "minecraft:birch_planks",
+                "count": 4
+              }
+            ],
+            "slots_used": 14,
+            "slots_total": 41
+          },
+          "target": null,
+          "on_ground": true,
+          "in_water": false,
+          "block_above": "minecraft:air",
+          "air": "300/300 ticks",
+          "in_lava": false,
+          "body_health": {
+            "degraded": false,
+            "consecutive_tick_errors": 0
+          }
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      }
+    ],
+    "history_before": 0,
+    "history_after": 5
+  },
+  "guidance_in_model": true,
+  "cancel_command": "Actor 的当前任务已叫停\n",
+  "cancel": "服务端取消围栏已变化",
+  "cancel_seconds": 2.0688347359973704,
+  "generation": [
+    1,
+    2
+  ],
+  "inventory_unchanged": true,
+  "stale_generation": {
+    "success": false,
+    "message": "stale action generation: cancelled"
+  },
+  "checkpoint_retained": false
+}

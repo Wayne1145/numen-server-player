@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 from pathlib import Path
 from typing import Any, Callable
@@ -160,6 +161,8 @@ def create_model_adapter(transport: Callable[[dict[str, Any]], dict[str, Any]],
 
 def load_persona(root: Path, name: str) -> str | None:
     """从 personas/<name>.md 加载角色卡；不存在返回 None。"""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+        raise ValueError("invalid persona name")
     path = root / "personas" / f"{name}.md"
     if not path.exists():
         return None
@@ -170,6 +173,8 @@ def make_load_skill(skills_root: Path) -> Callable[[dict[str, Any]], dict[str, A
     """本地工具 load_skill：读取 skills/<name>.md 内容交给模型。"""
     def load_skill(arguments: dict[str, Any]) -> dict[str, Any]:
         name = str(arguments.get("name", "")).strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+            return {"success": False, "error": "invalid skill name"}
         path = skills_root / f"{name}.md"
         if not name or not path.exists():
             return {"success": False, "error": f"skill not found: {name}"}
@@ -184,7 +189,7 @@ def make_world_memory_tools(store: Any) -> dict[str, Callable[[dict[str, Any]], 
             entry = store.remember(
                 str(arguments.get("type", "")), int(arguments.get("x", 0)),
                 int(arguments.get("y", 0)), int(arguments.get("z", 0)),
-                note=arguments.get("note"),
+                note=arguments.get("note"), dimension=arguments.get("dimension", "minecraft:overworld"),
             )
             return {"success": True, "entry": entry}
         except (ValueError, TypeError) as exc:
@@ -197,7 +202,7 @@ def make_world_memory_tools(store: Any) -> dict[str, Callable[[dict[str, Any]], 
             x=None if x is None else float(x),
             z=None if z is None else float(z),
             type=arguments.get("type"),
-            limit=int(arguments.get("limit", 20)),
+            limit=int(arguments.get("limit", 20)), dimension=arguments.get("dimension", "minecraft:overworld"),
         )
         return {"success": True, "blocks": blocks}
 
@@ -239,7 +244,7 @@ def attach_events(message: str, events: list[dict[str, Any]]) -> str:
         return message
     lines = ["<server_events>"]
     for event in events:
-        lines.append(f"[{event.get('kind', 'event')}] {event.get('detail', '')}")
+        lines.append(json.dumps(event, ensure_ascii=False, sort_keys=True))
     lines.append("</server_events>")
     return "\n".join(lines) + "\n\n" + message
 
@@ -328,7 +333,7 @@ def main() -> None:
         store=store,
         checkpoint=TurnCheckpoint(paths["checkpoint"]),
         mcp=mcp,
-        companion=args.companion,
+        companion=companion_id,
         model=create_model_adapter(live_transport, persona=persona),
         tools=tools,
         requires_control=requires_control,
@@ -340,6 +345,8 @@ def main() -> None:
     before = len(store.messages())
     inbox = EventInbox(ROOT / "inbox" / args.server_id / f"{companion_id}.jsonl")
     with CompanionRunLock(paths["lock"]):
+        store.reload()
+        memory_store.reload()
         if not args.recover and store.should_compact(
                 max_messages=COMPACT_MAX_MESSAGES, max_chars=COMPACT_MAX_CHARS):
             compact_history(store, create_compactor(live_transport))

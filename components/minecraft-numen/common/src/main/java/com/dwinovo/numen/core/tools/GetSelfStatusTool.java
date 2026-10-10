@@ -53,6 +53,7 @@ public final class GetSelfStatusTool implements NumenTool {
     public void onServerCall(String toolCallId, JsonObject args, NumenPlayer self, Consumer<String> reply) {
         JsonObject root = new JsonObject();
         root.addProperty("entity_id", self.getId());
+        root.addProperty("action_generation", com.dwinovo.numen.server.ActionGeneration.current(self.getUUID()));
         root.addProperty("name", self.getName().getString());
         root.addProperty("game_mode", self.gameMode.getGameModeForPlayer().getName());
         root.addProperty("hp", self.getHealth());

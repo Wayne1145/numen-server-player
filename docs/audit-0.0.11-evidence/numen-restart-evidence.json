@@ -1,0 +1,49 @@
+{
+  "running": {
+    "state": "queued",
+    "task_id": "t8",
+    "detail": "goto -325,100,150",
+    "result": null
+  },
+  "cancel": "Actor 的当前任务已叫停\n",
+  "terminal": {
+    "state": "stopped",
+    "task_id": "t8",
+    "detail": "goto: stopped by command",
+    "result": {
+      "success": false,
+      "message": "stopped by command",
+      "interrupted": true
+    }
+  },
+  "generation": 4,
+  "transfer_args": {
+    "companion": "Actor",
+    "client_action_id": "2bef538f-b5d8-4fb5-8174-f4ce698f3f3a",
+    "action_generation": 4,
+    "moves": [
+      {
+        "from": 36,
+        "to": 37,
+        "count": 3
+      }
+    ]
+  },
+  "receipt": {
+    "success": true,
+    "message": "1. moved 3 coal from slot 36 to slot 37 (slot 37 now 3; 7 left in slot 36)."
+  },
+  "gui_before_restart": {
+    "success": true,
+    "message": "GUI: InventoryMenu (YOUR own inventory — includes the 2x2 crafting grid below)\ncrafting grid 2x2 — put each recipe ingredient into the slot at the SAME position (a recipe smaller than the grid goes in the top-left); take the result from slot 0:\n  slot 1=-  |  slot 2=-\n  slot 3=-  |  slot 4=-\ncontainer slots:\n  (none)\nyour inventory (non-empty):\n  36: coal x7\n  37: coal x3\n  38: cooked_beef x4\n  39: iron_ingot x1\n  40: birch_log x1\n  44: birch_planks x4\ncursor: -\ntip: transfer {from} (no `to`) routes a whole stack to the other section; add `to` + `count` for an exact move into a specific slot."
+  },
+  "retry_after_restart": {
+    "success": true,
+    "message": "1. moved 3 coal from slot 36 to slot 37 (slot 37 now 3; 7 left in slot 36)."
+  },
+  "generation_after_restart": 4,
+  "gui_after_restart": {
+    "success": true,
+    "message": "GUI: InventoryMenu (YOUR own inventory — includes the 2x2 crafting grid below)\ncrafting grid 2x2 — put each recipe ingredient into the slot at the SAME position (a recipe smaller than the grid goes in the top-left); take the result from slot 0:\n  slot 1=-  |  slot 2=-\n  slot 3=-  |  slot 4=-\ncontainer slots:\n  (none)\nyour inventory (non-empty):\n  36: coal x7\n  37: coal x3\n  38: cooked_beef x4\n  39: iron_ingot x1\n  40: birch_log x1\n  44: birch_planks x4\ncursor: -\ntip: transfer {from} (no `to`) routes a whole stack to the other section; add `to` + `count` for an exact move into a specific slot."
+  }
+}

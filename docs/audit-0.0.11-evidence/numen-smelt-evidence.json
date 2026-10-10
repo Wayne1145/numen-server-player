@@ -1,0 +1,708 @@
+{
+  "server_id": "audit-smelt-485eceb0",
+  "before": {
+    "entity_id": 136,
+    "action_generation": 2,
+    "name": "Actor",
+    "game_mode": "survival",
+    "hp": 20.0,
+    "max_hp": 20.0,
+    "hunger": 20,
+    "saturation": 0.0,
+    "position": {
+      "x": -329.5,
+      "y": 100.0,
+      "z": 150.5
+    },
+    "dimension": "minecraft:overworld",
+    "biome": "minecraft:stony_shore",
+    "structures": [],
+    "equipment": {},
+    "inventory": {
+      "items": [
+        {
+          "slot": 0,
+          "item": "minecraft:iron_pickaxe",
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "item": "minecraft:coal",
+          "count": 2
+        },
+        {
+          "slot": 2,
+          "item": "minecraft:cooked_beef",
+          "count": 4
+        }
+      ],
+      "slots_used": 3,
+      "slots_total": 41
+    },
+    "target": null,
+    "on_ground": true,
+    "in_water": false,
+    "block_above": "minecraft:air",
+    "air": "300/300 ticks",
+    "in_lava": false,
+    "body_health": {
+      "degraded": false,
+      "consecutive_tick_errors": 0
+    }
+  },
+  "result": {
+    "final": "已完成：采集1个铁矿得到1个粗铁，用熔炉烧成1个铁锭，已取出并保留在背包（iron_ingot x1）。",
+    "actions": [
+      {
+        "tool": "get_self_status",
+        "dispatch": {
+          "entity_id": 136,
+          "action_generation": 2,
+          "name": "Actor",
+          "game_mode": "survival",
+          "hp": 20.0,
+          "max_hp": 20.0,
+          "hunger": 20,
+          "saturation": 0.0,
+          "position": {
+            "x": -329.5,
+            "y": 100.0,
+            "z": 150.5
+          },
+          "dimension": "minecraft:overworld",
+          "biome": "minecraft:stony_shore",
+          "structures": [],
+          "equipment": {},
+          "inventory": {
+            "items": [
+              {
+                "slot": 0,
+                "item": "minecraft:iron_pickaxe",
+                "count": 1
+              },
+              {
+                "slot": 1,
+                "item": "minecraft:coal",
+                "count": 2
+              },
+              {
+                "slot": 2,
+                "item": "minecraft:cooked_beef",
+                "count": 4
+              }
+            ],
+            "slots_used": 3,
+            "slots_total": 41
+          },
+          "target": null,
+          "on_ground": true,
+          "in_water": false,
+          "block_above": "minecraft:air",
+          "air": "300/300 ticks",
+          "in_lava": false,
+          "body_health": {
+            "degraded": false,
+            "consecutive_tick_errors": 0
+          }
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "goto",
+        "dispatch": {
+          "success": true,
+          "message": "已受理,后台执行中。用 task_status 轮询,身体转空闲即为完成,再用感知工具确认结果;task_stop 叫停。",
+          "data": {
+            "task_id": "t1",
+            "task": "goto",
+            "async": true
+          }
+        },
+        "task_id": "t1",
+        "terminal": {
+          "state": "done",
+          "task_id": "t1",
+          "detail": "goto: arrived beside minecraft:furnace at -329,100,152 — within reach to use.",
+          "result": {
+            "success": true,
+            "message": "arrived beside minecraft:furnace at -329,100,152 — within reach to use.",
+            "data": {
+              "final_y": 100.0,
+              "final_z": 151.0766081478461,
+              "final_x": -328.92411015278935,
+              "ground_y": 100
+            }
+          }
+        },
+        "samples": [
+          {
+            "state": "running",
+            "task_id": "t1",
+            "detail": "goto minecraft:furnace",
+            "result": null
+          },
+          {
+            "state": "done",
+            "task_id": "t1",
+            "detail": "goto: arrived beside minecraft:furnace at -329,100,152 — within reach to use.",
+            "result": {
+              "success": true,
+              "message": "arrived beside minecraft:furnace at -329,100,152 — within reach to use.",
+              "data": {
+                "final_y": 100.0,
+                "final_z": 151.0766081478461,
+                "final_x": -328.92411015278935,
+                "ground_y": 100
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tool": "mine",
+        "dispatch": {
+          "success": true,
+          "message": "已受理,后台执行中。用 task_status 轮询,身体转空闲即为完成,再用感知工具确认结果;task_stop 叫停。",
+          "data": {
+            "task_id": "t2",
+            "task": "mine",
+            "async": true
+          }
+        },
+        "task_id": "t2",
+        "terminal": {
+          "state": "done",
+          "task_id": "t2",
+          "detail": "mine: gathered 1/1 iron_ore+1 (gathered all requested)",
+          "result": {
+            "success": true,
+            "message": "gathered 1/1 iron_ore+1 (gathered all requested)",
+            "data": {
+              "requested": 1,
+              "mined_positions": "[-327,100,150]",
+              "blocked_reason": "arrived at a stance but no ore in reach/LOS (feet=-327, 100, 150)",
+              "gathered": 1,
+              "target": "iron_ore+1"
+            }
+          }
+        },
+        "samples": [
+          {
+            "state": "running",
+            "task_id": "t2",
+            "detail": "mine iron_ore+1 0/1",
+            "result": null
+          },
+          {
+            "state": "running",
+            "task_id": "t2",
+            "detail": "mine iron_ore+1 0/1",
+            "result": null
+          },
+          {
+            "state": "done",
+            "task_id": "t2",
+            "detail": "mine: gathered 1/1 iron_ore+1 (gathered all requested)",
+            "result": {
+              "success": true,
+              "message": "gathered 1/1 iron_ore+1 (gathered all requested)",
+              "data": {
+                "requested": 1,
+                "mined_positions": "[-327,100,150]",
+                "blocked_reason": "arrived at a stance but no ore in reach/LOS (feet=-327, 100, 150)",
+                "gathered": 1,
+                "target": "iron_ore+1"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tool": "get_self_status",
+        "dispatch": {
+          "entity_id": 136,
+          "action_generation": 2,
+          "name": "Actor",
+          "game_mode": "survival",
+          "hp": 20.0,
+          "max_hp": 20.0,
+          "hunger": 20,
+          "saturation": 0.0,
+          "position": {
+            "x": -326.7307328071386,
+            "y": 100.0,
+            "z": 150.79355946778296
+          },
+          "dimension": "minecraft:overworld",
+          "biome": "minecraft:stony_shore",
+          "structures": [],
+          "equipment": {
+            "mainhand": {
+              "item": "minecraft:iron_pickaxe"
+            }
+          },
+          "inventory": {
+            "items": [
+              {
+                "slot": 0,
+                "item": "minecraft:iron_pickaxe",
+                "count": 1
+              },
+              {
+                "slot": 1,
+                "item": "minecraft:coal",
+                "count": 2
+              },
+              {
+                "slot": 2,
+                "item": "minecraft:cooked_beef",
+                "count": 4
+              },
+              {
+                "slot": 3,
+                "item": "minecraft:raw_iron",
+                "count": 1
+              }
+            ],
+            "slots_used": 4,
+            "slots_total": 41
+          },
+          "target": null,
+          "on_ground": true,
+          "in_water": false,
+          "block_above": "minecraft:air",
+          "air": "300/300 ticks",
+          "in_lava": false,
+          "body_health": {
+            "degraded": false,
+            "consecutive_tick_errors": 0
+          }
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "goto",
+        "dispatch": {
+          "success": true,
+          "message": "已受理,后台执行中。用 task_status 轮询,身体转空闲即为完成,再用感知工具确认结果;task_stop 叫停。",
+          "data": {
+            "task_id": "t3",
+            "task": "goto",
+            "async": true
+          }
+        },
+        "task_id": "t3",
+        "terminal": {
+          "state": "done",
+          "task_id": "t3",
+          "detail": "goto: arrived beside minecraft:furnace at -329,100,152 — within reach to use.",
+          "result": {
+            "success": true,
+            "message": "arrived beside minecraft:furnace at -329,100,152 — within reach to use.",
+            "data": {
+              "final_y": 100.0,
+              "final_z": 152.14455754551435,
+              "final_x": -327.4883995191722,
+              "ground_y": 100
+            }
+          }
+        },
+        "samples": [
+          {
+            "state": "running",
+            "task_id": "t3",
+            "detail": "goto minecraft:furnace",
+            "result": null
+          },
+          {
+            "state": "done",
+            "task_id": "t3",
+            "detail": "goto: arrived beside minecraft:furnace at -329,100,152 — within reach to use.",
+            "result": {
+              "success": true,
+              "message": "arrived beside minecraft:furnace at -329,100,152 — within reach to use.",
+              "data": {
+                "final_y": 100.0,
+                "final_z": 152.14455754551435,
+                "final_x": -327.4883995191722,
+                "ground_y": 100
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tool": "interact_at",
+        "dispatch": {
+          "success": true,
+          "message": "已受理 interact_at right @-329,100,152，后台执行；请用 task_status(t4) 获取最终结果。",
+          "data": {
+            "task_id": "t4",
+            "task": "interact_at",
+            "async": true
+          }
+        },
+        "task_id": "t4",
+        "terminal": {
+          "state": "done",
+          "task_id": "t4",
+          "detail": "interact_at: right-clicked -329,100,152",
+          "result": {
+            "success": true,
+            "message": "right-clicked -329,100,152",
+            "data": {
+              "button": "right",
+              "x": -329,
+              "y": 100,
+              "z": 152,
+              "block": "furnace"
+            }
+          }
+        },
+        "samples": [
+          {
+            "state": "done",
+            "task_id": "t4",
+            "detail": "interact_at: right-clicked -329,100,152",
+            "result": {
+              "success": true,
+              "message": "right-clicked -329,100,152",
+              "data": {
+                "button": "right",
+                "x": -329,
+                "y": 100,
+                "z": 152,
+                "block": "furnace"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tool": "inspect_gui",
+        "dispatch": {
+          "success": true,
+          "message": "GUI: FurnaceMenu\ncontainer slots:\n  0: -\n  1: -\n  2: -\nyour inventory (non-empty):\n  30: iron_pickaxe x1\n  31: coal x2\n  32: cooked_beef x4\n  33: raw_iron x1\ncursor: -\ndata values (machine state — progress/fuel/energy/…, meaning is GUI-specific): [0, 0, 0, 0]\ntip: transfer {from} (no `to`) routes a whole stack to the other section; add `to` + `count` for an exact move into a specific slot."
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "transfer",
+        "dispatch": {
+          "success": true,
+          "message": "1. moved 1 raw_iron from slot 33 to slot 0 (slot 0 now 1; slot 33 emptied).\n2. slot 31 → 2: nothing moved — slot 2 refused it (output-only slot?)."
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "transfer",
+        "dispatch": {
+          "success": true,
+          "message": "1. moved 1 coal from slot 31 to slot 1 (slot 1 now 1; 1 left in slot 31)."
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "close_gui",
+        "dispatch": {
+          "success": true,
+          "message": "closed the GUI."
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "interact_at",
+        "dispatch": {
+          "success": true,
+          "message": "已受理 interact_at right @-329,100,152，后台执行；请用 task_status(t5) 获取最终结果。",
+          "data": {
+            "task_id": "t5",
+            "task": "interact_at",
+            "async": true
+          }
+        },
+        "task_id": "t5",
+        "terminal": {
+          "state": "done",
+          "task_id": "t5",
+          "detail": "interact_at: right-clicked -329,100,152",
+          "result": {
+            "success": true,
+            "message": "right-clicked -329,100,152",
+            "data": {
+              "button": "right",
+              "x": -329,
+              "y": 100,
+              "z": 152,
+              "block": "furnace"
+            }
+          }
+        },
+        "samples": [
+          {
+            "state": "done",
+            "task_id": "t5",
+            "detail": "interact_at: right-clicked -329,100,152",
+            "result": {
+              "success": true,
+              "message": "right-clicked -329,100,152",
+              "data": {
+                "button": "right",
+                "x": -329,
+                "y": 100,
+                "z": 152,
+                "block": "furnace"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tool": "inspect_gui",
+        "dispatch": {
+          "success": true,
+          "message": "GUI: FurnaceMenu\ncontainer slots:\n  0: raw_iron x1\n  1: -\n  2: -\nyour inventory (non-empty):\n  30: iron_pickaxe x1\n  31: coal x1\n  32: cooked_beef x4\ncursor: -\ndata values (machine state — progress/fuel/energy/…, meaning is GUI-specific): [1508, 1600, 93, 200]\ntip: transfer {from} (no `to`) routes a whole stack to the other section; add `to` + `count` for an exact move into a specific slot."
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "close_gui",
+        "dispatch": {
+          "success": true,
+          "message": "closed the GUI."
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "interact_at",
+        "dispatch": {
+          "success": true,
+          "message": "已受理 interact_at right @-329,100,152，后台执行；请用 task_status(t6) 获取最终结果。",
+          "data": {
+            "task_id": "t6",
+            "task": "interact_at",
+            "async": true
+          }
+        },
+        "task_id": "t6",
+        "terminal": {
+          "state": "done",
+          "task_id": "t6",
+          "detail": "interact_at: right-clicked -329,100,152",
+          "result": {
+            "success": true,
+            "message": "right-clicked -329,100,152",
+            "data": {
+              "button": "right",
+              "x": -329,
+              "y": 100,
+              "z": 152,
+              "block": "furnace"
+            }
+          }
+        },
+        "samples": [
+          {
+            "state": "running",
+            "task_id": "t6",
+            "detail": "interact_at right @-329,100,152",
+            "result": null
+          },
+          {
+            "state": "done",
+            "task_id": "t6",
+            "detail": "interact_at: right-clicked -329,100,152",
+            "result": {
+              "success": true,
+              "message": "right-clicked -329,100,152",
+              "data": {
+                "button": "right",
+                "x": -329,
+                "y": 100,
+                "z": 152,
+                "block": "furnace"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tool": "inspect_gui",
+        "dispatch": {
+          "success": true,
+          "message": "GUI: FurnaceMenu\ncontainer slots:\n  0: -\n  1: -\n  2: iron_ingot x1 [output]\nyour inventory (non-empty):\n  30: iron_pickaxe x1\n  31: coal x1\n  32: cooked_beef x4\ncursor: -\ndata values (machine state — progress/fuel/energy/…, meaning is GUI-specific): [1377, 1600, 0, 200]\ntip: transfer {from} (no `to`) routes a whole stack to the other section; add `to` + `count` for an exact move into a specific slot."
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "transfer",
+        "dispatch": {
+          "success": true,
+          "message": "1. moved 1 iron_ingot from slot 2 to slot 33 (slot 33 now 1; slot 2 emptied)."
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "close_gui",
+        "dispatch": {
+          "success": true,
+          "message": "closed the GUI."
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      },
+      {
+        "tool": "get_self_status",
+        "dispatch": {
+          "entity_id": 136,
+          "action_generation": 2,
+          "name": "Actor",
+          "game_mode": "survival",
+          "hp": 20.0,
+          "max_hp": 20.0,
+          "hunger": 20,
+          "saturation": 0.0,
+          "position": {
+            "x": -327.54502585819387,
+            "y": 100.0,
+            "z": 152.46086856066037
+          },
+          "dimension": "minecraft:overworld",
+          "biome": "minecraft:stony_shore",
+          "structures": [],
+          "equipment": {
+            "mainhand": {
+              "item": "minecraft:iron_pickaxe"
+            }
+          },
+          "inventory": {
+            "items": [
+              {
+                "slot": 0,
+                "item": "minecraft:iron_pickaxe",
+                "count": 1
+              },
+              {
+                "slot": 1,
+                "item": "minecraft:coal",
+                "count": 1
+              },
+              {
+                "slot": 2,
+                "item": "minecraft:cooked_beef",
+                "count": 4
+              },
+              {
+                "slot": 3,
+                "item": "minecraft:iron_ingot",
+                "count": 1
+              }
+            ],
+            "slots_used": 4,
+            "slots_total": 41
+          },
+          "target": null,
+          "on_ground": true,
+          "in_water": false,
+          "block_above": "minecraft:air",
+          "air": "300/300 ticks",
+          "in_lava": false,
+          "body_health": {
+            "degraded": false,
+            "consecutive_tick_errors": 0
+          }
+        },
+        "task_id": null,
+        "terminal": null,
+        "samples": []
+      }
+    ],
+    "history_before": 0,
+    "history_after": 38
+  },
+  "after": {
+    "entity_id": 136,
+    "action_generation": 2,
+    "name": "Actor",
+    "game_mode": "survival",
+    "hp": 20.0,
+    "max_hp": 20.0,
+    "hunger": 20,
+    "saturation": 0.0,
+    "position": {
+      "x": -327.54502585819387,
+      "y": 100.0,
+      "z": 152.46086856066037
+    },
+    "dimension": "minecraft:overworld",
+    "biome": "minecraft:stony_shore",
+    "structures": [],
+    "equipment": {
+      "mainhand": {
+        "item": "minecraft:iron_pickaxe"
+      }
+    },
+    "inventory": {
+      "items": [
+        {
+          "slot": 0,
+          "item": "minecraft:iron_pickaxe",
+          "count": 1
+        },
+        {
+          "slot": 1,
+          "item": "minecraft:coal",
+          "count": 1
+        },
+        {
+          "slot": 2,
+          "item": "minecraft:cooked_beef",
+          "count": 4
+        },
+        {
+          "slot": 3,
+          "item": "minecraft:iron_ingot",
+          "count": 1
+        }
+      ],
+      "slots_used": 4,
+      "slots_total": 41
+    },
+    "target": null,
+    "on_ground": true,
+    "in_water": false,
+    "block_above": "minecraft:air",
+    "air": "300/300 ticks",
+    "in_lava": false,
+    "body_health": {
+      "degraded": false,
+      "consecutive_tick_errors": 0
+    }
+  },
+  "checkpoint": null,
+  "furnace": {
+    "success": true,
+    "message": "minecraft:furnace at -329,100,152:\nitems #0 (sides: down), 2 slots:\n  (all 2 slots empty)\nitems #1 (sides: all), 3 slots:\n  (all 3 slots empty)\nitems #2 (sides: up), 1 slots:\n  (all 1 slots empty)\nitems #3 (sides: north,south,west,east), 1 slots:\n  (all 1 slots empty)\n"
+  }
+}

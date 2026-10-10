@@ -56,6 +56,11 @@ public final class CompanionTickDispatcher {
             // A degraded body is paused: skip its task brain entirely (its movement pass is
             // skipped in NumenPlayer.tick) so repeated failures can't keep driving broken work.
             if (p instanceof NumenPlayer ap && !ap.isDegraded()) {
+                if (com.dwinovo.numen.server.ActionBounds.violates(ap.getUUID(),
+                        ap.level().dimension().location().toString(),ap.getX(),ap.getY(),ap.getZ())) {
+                    stopActive(ap,"max_action_distance boundary reached");
+                    com.dwinovo.numen.server.ActionBounds.clear(ap.getUUID());
+                }
                 brainFor(ap.getUUID()).tick(ap);
             }
         }

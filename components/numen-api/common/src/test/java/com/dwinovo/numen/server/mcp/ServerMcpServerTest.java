@@ -229,7 +229,7 @@ class ServerMcpServerTest {
     }
 
     @Test
-    void sameClientActionIdDispatchesOnlyOnce() throws Exception {
+    void retriesStillPassThroughActuatorAuthorization() throws Exception {
         ServerMcpServer idempotentServer = new ServerMcpServer(
                 new McpNetConfig(true, "127.0.0.1", 0, 64 * 1024, 16, 32, 4, 10, 1000),
                 mockActuator,
@@ -252,7 +252,7 @@ class ServerMcpServerTest {
 
             JsonObject firstResult = JsonParser.parseString(first).getAsJsonObject().getAsJsonObject("result");
             JsonObject secondResult = JsonParser.parseString(second).getAsJsonObject().getAsJsonObject("result");
-            assertEquals(1, mockActuator.invokeCount, "同一 client_action_id 只能派发一次");
+            assertEquals(2, mockActuator.invokeCount, "每次重试必须走 actuator 授权；副作用去重在主线程持久注册表");
             assertTrue(firstResult.getAsJsonArray("content").get(0).getAsJsonObject()
                     .get("text").getAsString().contains("t1"));
             assertTrue(secondResult.getAsJsonArray("content").get(0).getAsJsonObject()

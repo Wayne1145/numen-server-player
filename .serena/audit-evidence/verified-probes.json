@@ -1,0 +1,57 @@
+[
+  {
+    "id": "cancel_restarts_old_chat",
+    "bug_reproduced": true,
+    "calls": [
+      [
+        "run",
+        "你刚刚收到了上面的服务器事件。这是玩家在游戏聊天里点你的名（@名字）。\n如果玩家给了具体任务（移动/挖掘/合成/放置/调查等），请按正常回合执行它——调用工具直到完成或安全地说明阻塞；如果是闲聊或问候，简短自然地回应即可。\n如果是你的死亡事件，简单说明情况，先恢复生存状态。\n规则：玩家点名给任务 → 执行；无任务纯聊天 → 回话。不要擅自做玩家没要求的大范围破坏。"
+      ]
+    ]
+  },
+  {
+    "id": "cancel_triggers_model",
+    "bug_reproduced": true,
+    "calls": [
+      [
+        "run",
+        "你刚刚收到了上面的服务器事件。这是玩家在游戏聊天里点你的名（@名字）。\n如果玩家给了具体任务（移动/挖掘/合成/放置/调查等），请按正常回合执行它——调用工具直到完成或安全地说明阻塞；如果是闲聊或问候，简短自然地回应即可。\n如果是你的死亡事件，简单说明情况，先恢复生存状态。\n规则：玩家点名给任务 → 执行；无任务纯聊天 → 回话。不要擅自做玩家没要求的大范围破坏。"
+      ]
+    ]
+  },
+  {
+    "id": "early_final_leaves_checkpoint",
+    "bug_reproduced": true,
+    "checkpoint_exists": true,
+    "messages": 0,
+    "result": "unavailable_tool_cap"
+  },
+  {
+    "id": "first_command_skipped",
+    "bug_reproduced": true,
+    "calls": [],
+    "cursor_exists": true
+  },
+  {
+    "id": "torn_tail",
+    "bug_reproduced": true,
+    "restored_messages": 0
+  },
+  {
+    "id": "cached_store_duplicates_commit",
+    "bug_reproduced": true,
+    "messages": 4
+  },
+  {
+    "id": "recovery_result_contract",
+    "bug_reproduced": true,
+    "error": "'final'"
+  },
+  {
+    "id": "provider_failure_loses_message",
+    "bug_reproduced": true,
+    "calls": 1,
+    "cursor_at_failed_event": true,
+    "inbox_remaining": 0
+  }
+]
