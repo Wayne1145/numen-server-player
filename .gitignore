@@ -38,6 +38,9 @@ usernamecache.json
 **/*apikey*
 **/*api_key*
 **/config/numen/api_key.txt
+# 文件名含 token 的 Java 鉴权实现不是密钥；允许干净源码导出包含它们。
+!components/numen-api/common/src/main/java/com/dwinovo/numen/server/AuthTokens.java
+!components/numen-api/common/src/test/java/com/dwinovo/numen/server/AuthTokensTest.java
 
 # IDE / OS / Python
 .idea/

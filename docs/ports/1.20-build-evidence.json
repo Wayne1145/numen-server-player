@@ -1,0 +1,36 @@
+{
+  "minecraft": "1.20",
+  "forge": "46.0.14",
+  "status": "experimental-build-only",
+  "gameplay_tested_versions": [
+    "1.20.1"
+  ],
+  "server_started": false,
+  "embedded": "META-INF/jarjar/numen-api-forge-1.20-0.0.7-fix4-mc1.20-exp.1.jar",
+  "jars": [
+    {
+      "name": "numen-forge-1.20-0.0.11-mc1.20-exp.1-all.jar",
+      "sha256": "b6fbf275bfaa242ff9bce6fc932e10094ec00f474cbb604573cbc8a5e975bcc1",
+      "bytes": 1436910
+    },
+    {
+      "name": "numen-api-forge-1.20-0.0.7-fix4-mc1.20-exp.1.jar",
+      "sha256": "463ddd7117123c7532c6d347020d394044a50750b1e444ca47a869c6e9aebe28",
+      "bytes": 755044
+    }
+  ],
+  "unit_tests": {
+    "numen-api": {
+      "tests": 167,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "minecraft-numen": {
+      "tests": 267,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  }
+}

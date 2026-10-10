@@ -131,7 +131,13 @@ cd ../minecraft-numen
 components/minecraft-numen/forge/build/libs/
 ```
 
-当前服务端分支只承诺 Forge/Mohist；Fabric 不属于这个公开快照的验收目标。
+当前服务端主线只承诺 Forge/Mohist 1.20.1；Fabric 不属于这个公开快照的验收目标。
+
+### 邻近版本实验构建
+
+提供 **MC 1.20 / Forge 46 的 build-only 实验移植**；仅1.20.1完成游戏内验收，1.20尚未启动服务器验证。实验JAR限定目标版本，不与1.20.1通用。1.19.4与1.20.2试编译暴露超出小改范围的接口差异，本轮不提供JAR。
+
+评估结果、构建脚本和风险见 [版本移植说明](docs/minecraft-version-ports.md)。请从 GitHub Releases 选择标有 `mc1.20-exp` 的 pre-release；不要用实验产物直接替换正式服。
 
 ## 服务端配置原则
 
