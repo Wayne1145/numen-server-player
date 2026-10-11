@@ -13,10 +13,11 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/Wayne1145/numen-server-player/releases) 下载 `numen-forge-1.20.1-0.0.10-all.jar`；
-2. 放入服务器 `mods/` 并重启（默认配置安全：MCP 关闭）；
-3. 控制台 `/numen server summon MyBot` 即可召唤 AI 玩家；
-4. 完整安装、配置、MCP/API 用法见 **[`docs/USAGE.md`](docs/USAGE.md)**。
+1. 从 [Releases](https://github.com/Wayne1145/numen-server-player/releases) 下载 `numen-forge-1.20.1-0.0.12-all.jar`；
+2. 放入服务器 `mods/` 并重启：首次自动部署持久大脑，新环境生成仅本机 MCP；
+3. 在 `config/numen/managed_brain.json` 填模型地址/模型，配置自己的 Key，再重启；Windows x64 自带Python，Linux需系统Python 3.10+；
+4. 控制台 `numenctl create MyBot` 创建同伴，`numen say MyBot 你好` 开始对话；
+5. **[随服托管安装与停服说明](docs/managed-brain.md)**；旧环境默认保留外置模式，完整手动 MCP/API 用法见 [`docs/USAGE.md`](docs/USAGE.md)。
 
 ## 核心能力
 

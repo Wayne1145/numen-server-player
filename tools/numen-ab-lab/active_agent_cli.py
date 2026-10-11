@@ -95,6 +95,10 @@ def main() -> None:
         mention_words=[w.strip() for w in args.mention_words.split(",") if w.strip()] or None,
     )
 
+    import os
+    if os.environ.get("NUMEN_EVENT_START_MS"):
+        agent.event_start_ms = int(os.environ["NUMEN_EVENT_START_MS"])
+
     if args.once:
         for companion in companions():
             result = agent.run_once(companion)

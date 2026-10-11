@@ -1,0 +1,58 @@
+{
+  "core_sha256": "ea2032491b72d0adb1d33943baa810bc47255a0b9b61271b4935062068b97156",
+  "bytes": 12916882,
+  "embedded_api_sha256": "0d2ff661f2061d5e3b6c80c19840b511cc58b03a72804adcfdf1df57c5e707d3",
+  "python_windows_sha256": "97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297",
+  "brain_payload_files": [
+    "action_brain.py",
+    "active_agent.py",
+    "active_agent_cli.py",
+    "brain_runner.py",
+    "brain_server.py",
+    "event_inbox.py",
+    "file_lock.py",
+    "managed_entry.py",
+    "persistent_action_cli.py",
+    "persistent_brain.py",
+    "world_memory.py",
+    "skills/combat.md",
+    "skills/mining.md"
+  ],
+  "java_core_tests": {
+    "tests": 271,
+    "failures": 0,
+    "errors": 0
+  },
+  "python_linux_tests": 159,
+  "python_windows_tests": 159,
+  "gameplay_validation": {
+    "minecraft": "1.20.1",
+    "forge": "47.4.0",
+    "os": "Windows x64",
+    "fresh_install": true,
+    "no_system_python_required": true,
+    "real_model_readonly_reply": "血量 20/20，满血，原地未动。",
+    "normal_stop_pid_pairs": [
+      [
+        13400,
+        27684
+      ],
+      [
+        28756,
+        11044
+      ]
+    ],
+    "forced_jvm_exit_pid_pair": [
+      31420,
+      31000
+    ],
+    "all_recorded_processes_exited": true,
+    "fresh_companion_first_message": true
+  },
+  "boundaries": [
+    "production untouched",
+    "Linux Forge lifecycle not exercised",
+    "Mohist managed lifecycle not exercised",
+    "MC1.20 experimental release unchanged"
+  ]
+}

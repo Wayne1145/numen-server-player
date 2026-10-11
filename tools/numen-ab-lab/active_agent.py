@@ -206,9 +206,20 @@ class ActiveAgent:
                 new_events.append(event)
             new_events.reverse()
         elif events:
-            # 首次运行：只建立游标（最新一条），不触发历史事件。
-            cursor_store.save(fingerprint(events[0]))
-            return None
+            # 托管入口记录启动时间：只过滤启动前的历史，不吞新创建同伴的首句话。
+            watermark = getattr(self, "event_start_ms", None)
+            if watermark is None:
+                cursor_store.save(fingerprint(events[0]))
+                return None
+            for event in reversed(events):
+                try:
+                    if int(event.get("time", 0)) >= watermark:
+                        new_events.append(event)
+                except (ValueError, TypeError):
+                    pass
+            if not new_events:
+                cursor_store.save(fingerprint(events[0]))
+                return None
         else:
             # 空缓冲也建立持久启动水位，后来的第一条事件不是历史。
             cursor_store.save("initialized-empty")

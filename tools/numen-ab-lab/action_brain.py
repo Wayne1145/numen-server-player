@@ -2,7 +2,7 @@
 """每同伴持久会话与 Numen MCP 身体之间的最小行动运行时。"""
 from __future__ import annotations
 
-import fcntl
+import file_lock as fcntl
 import json
 import os
 import re

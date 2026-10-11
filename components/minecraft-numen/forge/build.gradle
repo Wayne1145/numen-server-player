@@ -44,6 +44,45 @@ minecraft {
     }
 }
 
+// 托管大脑资源白名单：绝不打包本机配置、会话、密钥或测试世界。
+def brainSource = rootProject.file('../../tools/numen-ab-lab')
+def managedResources = layout.buildDirectory.dir('managed-resources')
+def windowsArchive = rootProject.file('../../.gradle/numen/python-3.13.16-embed-amd64.zip')
+tasks.register('bundleBrain', Zip) {
+    from(brainSource) {
+        include 'active_agent.py', 'active_agent_cli.py', 'action_brain.py', 'brain_runner.py'
+        include 'brain_server.py', 'event_inbox.py', 'persistent_action_cli.py', 'persistent_brain.py'
+        include 'world_memory.py', 'file_lock.py', 'managed_entry.py', 'skills/*.md'
+    }
+    archiveFileName = 'brain.zip'
+    destinationDirectory = managedResources.map { it.dir('numen-brain') }
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+tasks.register('bundleWindowsPython') {
+    outputs.file(managedResources.map { it.file('numen-brain/python-windows.zip') })
+    doLast {
+        windowsArchive.parentFile.mkdirs()
+        if (!windowsArchive.exists()) {
+            def partial = new File(windowsArchive.path + '.partial')
+            try {
+                new URL('https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip').withInputStream { input ->
+                    partial.withOutputStream { out -> out << input }
+                }
+                java.nio.file.Files.move(partial.toPath(), windowsArchive.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            } finally { partial.delete() }
+        }
+        def digest = java.security.MessageDigest.getInstance('SHA-256').digest(windowsArchive.bytes).encodeHex().toString()
+        if (digest != '97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297') {
+            throw new GradleException('Windows Python checksum mismatch; refusing to bundle')
+        }
+        copy { from windowsArchive; into managedResources.get().dir('numen-brain'); rename { 'python-windows.zip' } }
+    }
+}
+sourceSets.main.resources.srcDir(managedResources)
+tasks.named('processResources') { dependsOn 'bundleBrain', 'bundleWindowsPython' }
+tasks.named('sourcesJar') { dependsOn 'bundleBrain', 'bundleWindowsPython' }
+
 // Package this module's own datagen output (`./gradlew :forge:Data` writes it there).
 sourceSets.main.resources.srcDir 'src/generated/resources'
 sourceSets.main.resources.exclude '.cache/**'

@@ -22,6 +22,10 @@ The project is not an official Numen release. The names “Numen” and “言�
 
 The public snapshot intentionally removes the upstream ARR image/audio asset files. It retains `LICENSE-ASSETS` so downstream users understand that removing or replacing those assets does not relicense them.
 
+## Bundled CPython runtime
+
+Forge 0.0.12 packages the unmodified official CPython 3.13.16 Windows x64 embeddable ZIP as `numen-brain/python-windows.zip`. It is extracted locally only when managed mode needs the bundled interpreter. Its PSF license and third-party notices remain inside the archive (`LICENSE.txt`). Source: https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip ; SHA256: `97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297`.
+
 ## Fork changes
 
 The server fork adds or changes, among other things:

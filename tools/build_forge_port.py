@@ -42,7 +42,7 @@ def build(output: Path):
         subprocess.run(command,cwd=cwd,check=True)
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--target',required=True,choices=TARGETS);p.add_argument('--output',type=Path,required=True);p.add_argument('--ref',default='HEAD');p.add_argument('--build',action='store_true');p.add_argument('--index',action='store_true',help='仅开发测试：导出当前暂存树')
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--target',required=True,choices=TARGETS);p.add_argument('--output',type=Path,required=True);p.add_argument('--ref',default='7a908a4f2a6adb7a9512517ad0ec4f7b7b39efa9');p.add_argument('--build',action='store_true');p.add_argument('--index',action='store_true',help='仅开发测试：导出当前暂存树')
     a=p.parse_args();repo=Path(__file__).resolve().parents[1]
     cfg=prepare_port(repo,a.output.resolve(),a.target,a.ref,use_index=a.index)
     print(json.dumps(cfg,ensure_ascii=False),flush=True)

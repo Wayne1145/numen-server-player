@@ -13,7 +13,7 @@ class ForgePortBuildTest(unittest.TestCase):
     def test_export_has_exact_range_and_matching_engine(self):
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/'export'
-            prepare_port(ROOT,out,'1.20','HEAD',use_index=True)
+            prepare_port(ROOT,out,'1.20','7a908a4f2a6adb7a9512517ad0ec4f7b7b39efa9')
             self.assertTrue((out/'components/numen-api/common/src/main/java/com/dwinovo/numen/server/AuthTokens.java').exists())
             for mod in ['numen-api','minecraft-numen']:
                 text=(out/'components'/mod/'gradle.properties').read_text()

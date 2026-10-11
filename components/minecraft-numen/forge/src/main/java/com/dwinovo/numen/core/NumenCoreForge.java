@@ -27,9 +27,35 @@ import java.nio.file.Path;
  */
 @Mod(Constants.MOD_ID)
 public class NumenCoreForge {
+    private static volatile com.dwinovo.numen.core.brain.ManagedBrain managedBrain;
 
     public NumenCoreForge() {
         NumenCore.init();
+        // 首次释放配置必须早于 API 引擎在 ServerStartedEvent 中读取控制配置。
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.server.ServerAboutToStartEvent e) -> {
+            if (FMLEnvironment.dist != Dist.DEDICATED_SERVER) return;
+            try (var payload = NumenCoreForge.class.getResourceAsStream("/numen-brain/brain.zip")) {
+                if (payload == null) throw new java.io.IOException("managed brain resource missing");
+                var configRoot = net.minecraftforge.fml.loading.FMLPaths.CONFIGDIR.get().resolve("numen");
+                com.dwinovo.numen.core.brain.ManagedBrain.prepare(configRoot, payload);
+                managedBrain = new com.dwinovo.numen.core.brain.ManagedBrain(configRoot);
+            } catch (Exception ex) {
+                Constants.LOG.error("[numen-brain] preparation failed; server continues without managed brain ({})", ex.getClass().getSimpleName());
+            }
+        });
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.server.ServerStartedEvent e) -> {
+            var brain = managedBrain;
+            if (brain == null) return;
+            var starter = new Thread(() -> {
+                try { Constants.LOG.info("[numen-brain] {}", brain.start()); }
+                catch (Exception ex) { Constants.LOG.error("[numen-brain] start failed; check configuration/runtime ({})", ex.getClass().getSimpleName()); }
+            }, "numen-brain-start");
+            starter.setDaemon(true); starter.start();
+        });
+        MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.server.ServerStoppingEvent e) -> {
+            var brain = managedBrain; managedBrain = null;
+            if (brain != null) brain.close();
+        });
 
         MinecraftForge.EVENT_BUS.addListener(NumenCoreForge::onServerTickPost);
         // 服务器事件(玩家聊天/死亡)进入环形缓冲，供 MCP get_recent_events 读取。

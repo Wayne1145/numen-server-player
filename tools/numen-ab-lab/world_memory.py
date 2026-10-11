@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import fcntl
+import file_lock as fcntl
 from functools import wraps
 import os
 import uuid
